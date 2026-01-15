@@ -1905,30 +1905,30 @@ function Library:createManager(options: table)
 
 		for elementType, elementData in pairs(shared.Flags) do
 			for elementName, _ in pairs(elementData) do
-				if elementType == "Dropdown" and decoded.Dropdown[elementName] and elementName ~= "Configs" then
+				if elementType == "Dropdown" and decoded.Dropdown[elementName] and shared.Flags.Dropdown[elementName] and elementName ~= "Configs" then
 					shared.Flags.Dropdown[elementName]:updateList({
 						list = decoded.Dropdown[elementName].list,
 						default = decoded.Dropdown[elementName].value,
 					})
 				end
 
-				if elementType == "Toggle" and decoded.Toggle[elementName] then
+				if elementType == "Toggle" and decoded.Toggle[elementName] and shared.Flags.Toggle[elementName] then
 					shared.Flags.Toggle[elementName]:updateState({ state = decoded.Toggle[elementName].state })
 				end
 
-				if elementType == "Slider" and decoded.Slider[elementName] then
+				if elementType == "Slider" and decoded.Slider[elementName] and shared.Flags.Slider[elementName] then
 					shared.Flags.Slider[elementName]:updateValue({ value = decoded.Slider[elementName].value })
 				end
 
-				if elementType == "Keybind" and decoded.Keybind[elementName] then
+				if elementType == "Keybind" and decoded.Keybind[elementName] and shared.Flags.Keybind[elementName] then
 					shared.Flags.Keybind[elementName]:updateKeybind({ bind = decoded.Keybind[elementName].keybind })
 				end
 
-				if elementType == "TextBox" and decoded.TextBox[elementName] then
+				if elementType == "TextBox" and decoded.TextBox[elementName] and shared.Flags.TextBox[elementName] then
 					shared.Flags.TextBox[elementName]:updateText({ text = decoded.TextBox[elementName].text })
 				end
 
-				if elementType == "ColorPicker" and decoded.ColorPicker[elementName] then
+				if elementType == "ColorPicker" and decoded.ColorPicker[elementName] and shared.Flags.ColorPicker[elementName] then
 					shared.Flags.ColorPicker[elementName]:updateColor({
 						color = Color3.fromRGB(unpack(decoded.ColorPicker[elementName].color)),
 					})
@@ -1943,7 +1943,7 @@ function Library:createManager(options: table)
 
 		for elementType, elementData in pairs(shared.Flags) do
 			for elementName, _ in pairs(elementData) do
-				if elementType == "ColorPicker" and decoded.ColorPicker[elementName] then
+				if elementType == "ColorPicker" and decoded.ColorPicker[elementName] and shared.Flags.ColorPicker[elementName] then
 					shared.Flags.ColorPicker[elementName]:updateColor({
 						color = Color3.fromRGB(unpack(decoded.ColorPicker[elementName].color)),
 					})
