@@ -25,11 +25,11 @@ local Library = {
 	firstTabDebounce = false,
 	firstSubTabDebounce = false,
 	processedEvent = false,
-	managerCreated = false, -- Using this as a check to clean up unused Addon objects
+	managerCreated = false,
 	lineIndex = 0,
 
 	Connections = {},
-	Addons = {}, -- To store addon frames to clean up unused ones later, this is my solution to this problem, if you can find a better solution then just create a pull request, thanks.
+	Addons = {},
 	Exclusions = {},
 	SectionFolder = {
 		Left = {},
@@ -44,7 +44,8 @@ local Library = {
 		ColorPicker = {},
 	},
 	Theme = {},
-	DropdownSizes = {}, -- to store previous opened dropdown size to resize scrollingFrame canvassize
+	DropdownSizes = {},
+	TooltipInstance = nil,
 }
 Library.__index = Library
 
@@ -121,7 +122,6 @@ Library.Theme = Theme
 
 local Popups = ScreenGui.Popups
 
--- Set default size for UI
 local Glow = ScreenGui.Glow
 Glow.Size = UDim2.fromOffset(Library.sizeX, Library.sizeY)
 
@@ -143,7 +143,109 @@ else
 	UserIsPoor = false
 end
 
--- Tab resizing stuff
+function Library:createTooltip()
+	if Library.TooltipInstance then
+		return Library.TooltipInstance
+	end
+
+	local Tooltip = Instance.new("Frame")
+	Tooltip.Name = "Tooltip"
+	Tooltip.BackgroundColor3 = Theme.SecondaryBackgroundColor
+	Tooltip.BorderSizePixel = 0
+	Tooltip.Visible = false
+	Tooltip.ZIndex = 9999
+	Tooltip.Parent = ScreenGui
+
+	local UICorner = Instance.new("UICorner")
+	UICorner.CornerRadius = UDim.new(0, 4)
+	UICorner.Parent = Tooltip
+
+	local UIPadding = Instance.new("UIPadding")
+	UIPadding.PaddingLeft = UDim.new(0, 8)
+	UIPadding.PaddingRight = UDim.new(0, 8)
+	UIPadding.PaddingTop = UDim.new(0, 6)
+	UIPadding.PaddingBottom = UDim.new(0, 6)
+	UIPadding.Parent = Tooltip
+
+	local TextLabel = Instance.new("TextLabel")
+	TextLabel.Name = "Text"
+	TextLabel.BackgroundTransparency = 1
+	TextLabel.Size = UDim2.fromScale(1, 1)
+	TextLabel.Font = Enum.Font.Gotham
+	TextLabel.TextSize = 13
+	TextLabel.TextColor3 = Theme.PrimaryTextColor
+	TextLabel.TextXAlignment = Enum.TextXAlignment.Left
+	TextLabel.TextYAlignment = Enum.TextYAlignment.Center
+	TextLabel.Parent = Tooltip
+
+	local Border = Instance.new("UIStroke")
+	Border.Color = Theme.Line
+	Border.Thickness = 1
+	Border.Parent = Tooltip
+
+	Theme:registerToObjects({
+		{ object = Tooltip, property = "BackgroundColor3", theme = { "SecondaryBackgroundColor" } },
+		{ object = TextLabel, property = "TextColor3", theme = { "PrimaryTextColor" } },
+		{ object = Border, property = "Color", theme = { "Line" } },
+	})
+
+	Library.TooltipInstance = Tooltip
+	return Tooltip
+end
+
+function Library:showTooltip(element, text)
+	if not text or text == "" then return end
+
+	local Tooltip = Library:createTooltip()
+	local TextLabel = Tooltip.Text
+
+	TextLabel.Text = text
+	local textSize = TextService:GetTextSize(text, 13, Enum.Font.Gotham, Vector2.new(300, 1000))
+	Tooltip.Size = UDim2.fromOffset(textSize.X + 16, textSize.Y + 12)
+	Tooltip.BackgroundTransparency = 1
+	TextLabel.TextTransparency = 1
+
+	local function updatePosition()
+		local mousePos = UserInputService:GetMouseLocation()
+		local offsetX = -30
+		local offsetY = -30
+		Tooltip.Position = UDim2.fromOffset(mousePos.X + offsetX, mousePos.Y + offsetY)
+	end
+
+	updatePosition()
+	Tooltip.Visible = true
+
+	Utility:tween(Tooltip, { BackgroundTransparency = 0 }, 0.15, "Quart", "Out"):Play()
+	Utility:tween(TextLabel, { TextTransparency = 0 }, 0.15, "Quart", "Out"):Play()
+
+	local moveConnection
+	moveConnection = UserInputService.InputChanged:Connect(function(input)
+		if input.UserInputType == Enum.UserInputType.MouseMovement then
+			updatePosition()
+		end
+	end)
+
+	table.insert(Connections, moveConnection)
+	return moveConnection
+end
+
+function Library:hideTooltip(connection)
+	if not Library.TooltipInstance then return end
+
+	local Tooltip = Library.TooltipInstance
+	local TextLabel = Tooltip.Text
+
+	Utility:tween(Tooltip, { BackgroundTransparency = 1 }, 0.1, "Quart", "Out"):Play()
+	Utility:tween(TextLabel, { TextTransparency = 1 }, 0.1, "Quart", "Out"):Play()
+
+	task.wait(0.1)
+	Tooltip.Visible = false
+
+	if connection then
+		connection:Disconnect()
+	end
+end
+
 local tabResizing = false
 Resize.MouseButton1Down:Connect(function()
 	tabResizing = true
@@ -156,8 +258,8 @@ local touchMoved = UserInputService.TouchMoved:Connect(function()
 			72,
 			208
 		)
-		Utility:tween(Tabs, { Size = UDim2.new(0, newSizeX, 1, 0) }, 0.2):Play()
-		Utility:tween(Background.Pages, { Size = UDim2.new(1, -newSizeX, 1, 0) }, 0.2):Play()
+		Utility:tween(Tabs, { Size = UDim2.new(0, newSizeX, 1, 0) }, 0.2, "Quart", "Out"):Play()
+		Utility:tween(Background.Pages, { Size = UDim2.new(1, -newSizeX, 1, 0) }, 0.2, "Quart", "Out"):Play()
 	end
 end)
 
@@ -168,8 +270,8 @@ local inputChanged = UserInputService.InputChanged:Connect(function(input)
 			72,
 			208
 		)
-		Utility:tween(Tabs, { Size = UDim2.new(0, newSizeX, 1, 0) }, 0.2):Play()
-		Utility:tween(Background.Pages, { Size = UDim2.new(1, -newSizeX, 1, 0) }, 0.2):Play()
+		Utility:tween(Tabs, { Size = UDim2.new(0, newSizeX, 1, 0) }, 0.2, "Quart", "Out"):Play()
+		Utility:tween(Background.Pages, { Size = UDim2.new(1, -newSizeX, 1, 0) }, 0.2, "Quart", "Out"):Play()
 	end
 end)
 
@@ -187,7 +289,6 @@ Resize.InputEnded:Connect(function(input)
 	end
 end)
 
--- Mobile compatibility
 Glow:GetPropertyChangedSignal("AbsoluteSize"):Connect(function()
 	for _, data in ipairs(Library.SectionFolder.Right) do
 		if Glow.AbsoluteSize.X <= 660 then
@@ -273,10 +374,8 @@ function Library.new(options)
 			local elapsed = tick() - startTime
 			local progress = (elapsed % cycleDuration) / cycleDuration
 			
-			-- Smooth hue cycling from 0 to 1 (full spectrum)
 			local currentHue = progress
 			
-			-- Create color with cycled hue but original saturation/value
 			local newColor = Color3.fromHSV(currentHue, originalSaturation, originalValue)
 			titleIcon.ImageColor3 = newColor
 		end)
@@ -297,16 +396,13 @@ function Library.new(options)
 			rainbowConnection = nil
 		end
 		
-		-- Restore original theme color
 		titleIcon.ImageColor3 = Library.Theme.PrimaryTextColor
 		
-		-- Re-register to theme system
 		Theme:registerToObjects({
 			{ object = titleIcon, property = "ImageColor3", theme = { "PrimaryTextColor" } },
 		})
 	end
 	
-	-- icon setup
 	if UserIsPoor then
 		Title.Text = options.title
 		if Title:FindFirstChild("TitleIcon") then
@@ -327,12 +423,16 @@ function Library.new(options)
 
 		TitleIcon.Image = options.iconTitle
 		TitleIcon.Visible = true
+		TitleIcon.ImageColor3 = Library.Theme.PrimaryTextColor
 		Title.Text = "       " .. options.title
+
+		-- Register icon to theme system
+		Theme:registerToObjects({
+			{ object = TitleIcon, property = "ImageColor3", theme = { "PrimaryTextColor" } },
+		})
 
 		if options.rainbowIcon then
 			createNaturalRainbowEffect(TitleIcon)
-		else
-			stopRainbowEffect(TitleIcon)
 		end
 	end
 
@@ -383,7 +483,7 @@ function Library:createAddons(text, imageButton, scrollingFrame, additionalAddon
 		end,
 
 		createDropdown = function(self, options)
-			options.default = {} -- need to do this for some reason since I clearly implied that default was as table value but guess not?
+			options.default = {}
 			Library:createDropdown(options, Addon.Inner, scrollingFrame)
 		end,
 
@@ -414,7 +514,6 @@ function Library:createAddons(text, imageButton, scrollingFrame, additionalAddon
 
 			if type(originalFunction) == "function" then
 				return function(...)
-					-- Show imageButton if the index name is "create"
 					if string.match(key, "create") then
 						if Addon.Parent == nil then
 							Addon.Parent = Popups
@@ -423,7 +522,6 @@ function Library:createAddons(text, imageButton, scrollingFrame, additionalAddon
 						imageButton.Visible = true
 					end
 
-					-- updateTransparentObjects again to account for the new creation of element after the call.
 					return originalFunction(...), Popup:updateTransparentObjects(Addon)
 				end
 			else
@@ -439,7 +537,7 @@ end
 
 function Library:destroy()
 	for _, rbxSignals in ipairs(Connections) do
-		rbxSignals:Disconnect() -- Changed from disconnect() to Disconnect()
+		rbxSignals:Disconnect()
 	end
 	task.wait(0.1)
 	ScreenGui:Destroy()
@@ -488,7 +586,6 @@ function Library:createTab(options: table)
 		icon = { Default = "124718082122263", ExpectedType = "string" },
 	})
 
-	-- Change tab size depending on Library.tabSizeX, maybe make resizer for tabs later
 	Background.Tabs.Size = UDim2.new(0, Library.tabSizeX, 1, 0)
 	Background.Pages.Size = UDim2.new(1, -Library.tabSizeX, 1, 0)
 
@@ -530,10 +627,10 @@ function Library:createTab(options: table)
 		imageTransparency: number
 	)
 		Utility
-			:tween(tab, { BackgroundColor3 = backgroundColor3, BackgroundTransparency = backgroundTransparency }, 0.5)
+			:tween(tab, { BackgroundColor3 = backgroundColor3, BackgroundTransparency = backgroundTransparency }, 0.3, "Quart", "Out")
 			:Play()
-		Utility:tween(icon, { ImageTransparency = imageTransparency, ImageColor3 = color }, 0.5):Play()
-		Utility:tween(textButton, { TextColor3 = color, TextTransparency = textTransparency }, 0.5):Play()
+		Utility:tween(icon, { ImageTransparency = imageTransparency, ImageColor3 = color }, 0.3, "Quart", "Out"):Play()
+		Utility:tween(textButton, { TextColor3 = color, TextTransparency = textTransparency }, 0.3, "Quart", "Out"):Play()
 	end
 
 	local function fadeAnimation()
@@ -543,16 +640,16 @@ function Library:createTab(options: table)
 			textTransparency: number,
 			paddingY: number
 		)
-			Utility:tween(fade, { BackgroundTransparency = backgroundTransparency }, 0.2):Play()
-			Utility:tween(CurrentTabLabel.UIPadding, { PaddingBottom = UDim.new(0, paddingY) }, 0.2):Play()
+			Utility:tween(fade, { BackgroundTransparency = backgroundTransparency }, 0.25, "Quart", "Out"):Play()
+			Utility:tween(CurrentTabLabel.UIPadding, { PaddingBottom = UDim.new(0, paddingY) }, 0.25, "Quart", "Out"):Play()
 		end
 
 		for _, subPage in ipairs(Page:GetChildren()) do
 			if subPage.Name == "SubPage" and subPage.Visible and subPage:FindFirstChild("ScrollingFrame") then
-				Utility:tween(subPage.ScrollingFrame.UIPadding, { PaddingTop = UDim.new(0, 10) }, 0.2):Play()
+				Utility:tween(subPage.ScrollingFrame.UIPadding, { PaddingTop = UDim.new(0, 10) }, 0.2, "Quart", "Out"):Play()
 
 				task.delay(0.2, function()
-					Utility:tween(subPage.ScrollingFrame.UIPadding, { PaddingTop = UDim.new(0, 0) }, 0.2):Play()
+					Utility:tween(subPage.ScrollingFrame.UIPadding, { PaddingTop = UDim.new(0, 0) }, 0.2, "Quart", "Out"):Play()
 				end)
 			end
 		end
@@ -564,9 +661,9 @@ function Library:createTab(options: table)
 
 		tweenFadeAndPage(Fade, 0, 1, 14)
 
-		task.delay(0.2, function()
+		task.delay(0.25, function()
 			tweenFadeAndPage(Fade, 1, 0, 0)
-			task.wait(0.2)
+			task.wait(0.25)
 			Fade:Destroy()
 		end)
 	end
@@ -618,7 +715,6 @@ function Library:createTab(options: table)
 
 	local Navigation = Modules.Navigation.new(Context)
 
-	-- this is stupid but anyways!!!
 	if not self.firstTabDebounce then
 		Navigation:enableFirstTab()
 		self.firstTabDebounce = true
@@ -655,7 +751,6 @@ function Library:createTab(options: table)
 end
 
 function Library:createSubTab(options: table)
-	-- Use provided options, or fall back to defaults if not provided
 	Utility:validateOptions(options, {
 		sectionStyle = { Default = "Double", ExpectedType = "string" },
 		text = { Default = "SubTab", ExpectedType = "string" },
@@ -678,7 +773,6 @@ function Library:createSubTab(options: table)
 	SubTab.Size =
 		UDim2.new(0, TextService:GetTextSize(options.text, 15, Enum.Font.MontserratMedium, SubTab.AbsoluteSize).X, 1, 0)
 
-	-- Calculate subTab position to position underline
 	local subTabIndex, subTabPosition = 0, 0
 
 	for index, subTab in ipairs(ScrollingFrame:GetChildren()) do
@@ -707,14 +801,14 @@ function Library:createSubTab(options: table)
 		textTransparency: number,
 		disableUnderlineTween: boolean
 	)
-		Utility:tween(subTab, { TextColor3 = textColor, TextTransparency = textTransparency }, 0.2):Play()
+		Utility:tween(subTab, { TextColor3 = textColor, TextTransparency = textTransparency }, 0.25, "Quart", "Out"):Play()
 
 		if not disableUnderlineTween then
 			Utility:tween(underline, {
 				BackgroundColor3 = Theme.PrimaryColor,
 				Position = UDim2.new(0, subTabPosition, 1, 0),
 				Size = UDim2.new(0, subTab.Size.X.Offset, 0, 2),
-			}, 0.2):Play()
+			}, 0.25, "Quart", "Out"):Play()
 		end
 	end
 
@@ -724,10 +818,10 @@ function Library:createSubTab(options: table)
 	end
 
 	local function updateSectionAnimation()
-		Utility:tween(SubPage.ScrollingFrame.UIPadding, { PaddingTop = UDim.new(0, 10) }, 0.2):Play()
+		Utility:tween(SubPage.ScrollingFrame.UIPadding, { PaddingTop = UDim.new(0, 10) }, 0.2, "Quart", "Out"):Play()
 
 		task.delay(0.2, function()
-			Utility:tween(SubPage.ScrollingFrame.UIPadding, { PaddingTop = UDim.new(0, 0) }, 0.2):Play()
+			Utility:tween(SubPage.ScrollingFrame.UIPadding, { PaddingTop = UDim.new(0, 0) }, 0.2, "Quart", "Out"):Play()
 		end)
 	end
 
@@ -801,7 +895,6 @@ function Library:createSection(options: table)
 	Section.Visible = true
 	Section.Parent = self[options.position]
 
-	-- Change section style
 	local screenSize = workspace.CurrentCamera.ViewportSize
 	if self.sectionStyle == "Single" or (screenSize.X <= 740 and screenSize.Y <= 590) or self.sizeX <= 660 then
 		if options.position == "Right" then
@@ -816,7 +909,6 @@ function Library:createSection(options: table)
 		Section.Parent = self.Left
 	end
 
-	-- Store objects to change section style depending on the size of the UI
 	if options.position == "Right" and self.sectionStyle ~= "Single" then
 		table.insert(self.SectionFolder.Right, { folders = { Left = self.Left, Right = self.Right }, object = Section })
 	end
@@ -830,7 +922,6 @@ function Library:createSection(options: table)
 	local TextLabel = Inner.TextLabel
 	TextLabel.Text = options.text
 
-	-- Auto size section
 	Section.Inner.UIListLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
 		Section.Size = UDim2.new(1, 0, 0, Section.Inner.UIListLayout.AbsoluteContentSize.Y + 28)
 	end)
@@ -850,6 +941,7 @@ function Library:createToggle(options: table, parent, scrollingFrame)
 		text = { Default = "Toggle", ExpectedType = "string" },
 		state = { Default = false, ExpectedType = "boolean" },
 		callback = { Default = function() end, ExpectedType = "function" },
+		tooltip = { Default = "", ExpectedType = "string" },
 	})
 
 	scrollingFrame = self.ScrollingFrame or scrollingFrame
@@ -866,14 +958,24 @@ function Library:createToggle(options: table, parent, scrollingFrame)
 	local Background = TextButton.Background
 	local Circle = Background.Circle
 
+	local tooltipConnection
+	if options.tooltip and options.tooltip ~= "" then
+		TextLabel.MouseEnter:Connect(function()
+			tooltipConnection = Library:showTooltip(TextLabel, options.tooltip)
+		end)
+		TextLabel.MouseLeave:Connect(function()
+			Library:hideTooltip(tooltipConnection)
+		end)
+	end
+
 	local function tweenToggleAssets(
 		backgroundColor: Color3,
 		circleColor: Color3,
 		anchorPoint: Vector2,
 		position: UDim2
 	)
-		Utility:tween(Background, { BackgroundColor3 = backgroundColor }, 0.2):Play()
-		Utility:tween(Circle, { BackgroundColor3 = circleColor, AnchorPoint = anchorPoint, Position = position }, 0.2)
+		Utility:tween(Background, { BackgroundColor3 = backgroundColor }, 0.25, "Quart", "Out"):Play()
+		Utility:tween(Circle, { BackgroundColor3 = circleColor, AnchorPoint = anchorPoint, Position = position }, 0.25, "Quart", "Out")
 			:Play()
 	end
 
@@ -889,8 +991,7 @@ function Library:createToggle(options: table, parent, scrollingFrame)
 					Theme.SecondaryBackgroundColor,
 					Theme.PrimaryBackgroundColor,
 					Vector2.new(0, 0.5),
-					UDim2.fromScale(0, 0.5),
-					0.2
+					UDim2.fromScale(0, 0.5)
 				)
 				circleOn = false
 			end,
@@ -903,8 +1004,7 @@ function Library:createToggle(options: table, parent, scrollingFrame)
 					Theme.PrimaryColor,
 					Theme.TertiaryBackgroundColor,
 					Vector2.new(1, 0.5),
-					UDim2.fromScale(1, 0.5),
-					0.2
+					UDim2.fromScale(1, 0.5)
 				)
 				circleOn = true
 			end,
@@ -956,6 +1056,7 @@ function Library:createSlider(options: table, parent, scrollingFrame)
 		max = { Default = 100, ExpectedType = "number" },
 		step = { Default = 1, ExpectedType = "number" },
 		callback = { Default = function() end, ExpectedType = "function" },
+		tooltip = { Default = "", ExpectedType = "string" },
 	})
 
 	options.default = options.default or options.min
@@ -977,6 +1078,16 @@ function Library:createSlider(options: table, parent, scrollingFrame)
 	local TextLabel = TextButton.TextLabel
 	TextLabel.Text = options.text
 
+	local tooltipConnection
+	if options.tooltip and options.tooltip ~= "" then
+		TextLabel.MouseEnter:Connect(function()
+			tooltipConnection = Library:showTooltip(TextLabel, options.tooltip)
+		end)
+		TextLabel.MouseLeave:Connect(function()
+			Library:hideTooltip(tooltipConnection)
+		end)
+	end
+
 	local Circle = Fill.Circle
 	local InnerCircle = Circle.InnerCircle
 	local CurrentValueLabel = Circle.TextButton.CurrentValueLabel
@@ -987,7 +1098,7 @@ function Library:createSlider(options: table, parent, scrollingFrame)
 			Size = UDim2.fromOffset(TextBoundsX, 20),
 			BackgroundTransparency = transparency,
 			TextTransparency = transparency,
-		}):Play()
+		}, 0.2, "Quart", "Out"):Play()
 	end
 
 	local Context = Utility:validateContext({
@@ -1005,14 +1116,14 @@ function Library:createSlider(options: table, parent, scrollingFrame)
 		autoSizeTextBox = {
 			Value = function()
 				local TextBoundsX = math.clamp(TextLabel.TextBox.TextBounds.X + 14, 10, 200)
-				Utility:tween(TextLabel.TextBox, { Size = UDim2.fromOffset(TextBoundsX, 20) }, 0.2):Play()
+				Utility:tween(TextLabel.TextBox, { Size = UDim2.fromOffset(TextBoundsX, 20) }, 0.2, "Quart", "Out"):Play()
 			end,
 			ExpectedType = "function",
 		},
 
 		updateFill = {
 			Value = function(sizeX)
-				Utility:tween(Line.Fill, { Size = UDim2.fromScale(sizeX, 1) }, 0.2):Play()
+				Utility:tween(Line.Fill, { Size = UDim2.fromScale(sizeX, 1) }, 0.2, "Quart", "Out"):Play()
 			end,
 			ExpectedType = "function",
 		},
@@ -1080,6 +1191,7 @@ function Library:createPicker(options: table, parent, scrollingFrame, isPickerBo
 		default = { Default = Color3.fromRGB(255, 0, 0), ExpectedType = "Color3" },
 		color = { Default = Color3.fromRGB(255, 0, 0), ExpectedType = "Color3" },
 		callback = { Default = function() end, ExpectedType = "function" },
+		tooltip = { Default = "", ExpectedType = "string" },
 	})
 
 	isPickerBoolean = isPickerBoolean or false
@@ -1093,6 +1205,16 @@ function Library:createPicker(options: table, parent, scrollingFrame, isPickerBo
 	local TextLabel = Picker.TextLabel
 	TextLabel.Text = options.text
 
+	local tooltipConnection
+	if options.tooltip and options.tooltip ~= "" then
+		TextLabel.MouseEnter:Connect(function()
+			tooltipConnection = Library:showTooltip(TextLabel, options.tooltip)
+		end)
+		TextLabel.MouseLeave:Connect(function()
+			Library:hideTooltip(tooltipConnection)
+		end)
+	end
+
 	local ImageButton = TextLabel.ImageButton
 	local Background = TextLabel.Background
 	local TextButton = Background.TextButton
@@ -1100,7 +1222,6 @@ function Library:createPicker(options: table, parent, scrollingFrame, isPickerBo
 	local ColorPicker = Assets.Elements.ColorPicker:Clone()
 	ColorPicker.Parent = Popups
 
-	-- Put transparent objects to not be visible to make cool effect later!!
 	local ColorPickerTransparentObjects = Utility:getTransparentObjects(ColorPicker)
 
 	for _, data in ipairs(ColorPickerTransparentObjects) do
@@ -1145,14 +1266,14 @@ function Library:createPicker(options: table, parent, scrollingFrame, isPickerBo
 
 		submitAnimation = {
 			Value = function()
-				Utility:tween(Submit.TextLabel, { BackgroundTransparency = 0 }, 0.2):Play()
-				Utility:tween(Submit.TextLabel, { TextColor3 = Theme.PrimaryColor, TextTransparency = 0 }, 0.2):Play()
+				Utility:tween(Submit.TextLabel, { BackgroundTransparency = 0 }, 0.2, "Quart", "Out"):Play()
+				Utility:tween(Submit.TextLabel, { TextColor3 = Theme.PrimaryColor, TextTransparency = 0 }, 0.2, "Quart", "Out"):Play()
 
 				task.delay(0.2, function()
 					Utility
-						:tween(Submit.TextLabel, { TextColor3 = Theme.SecondaryTextColor, TextTransparency = 0 }, 0.2)
+						:tween(Submit.TextLabel, { TextColor3 = Theme.SecondaryTextColor, TextTransparency = 0 }, 0.2, "Quart", "Out")
 						:Play()
-					Utility:tween(Submit.TextLabel, { BackgroundTransparency = 0.3 }, 0.2):Play()
+					Utility:tween(Submit.TextLabel, { BackgroundTransparency = 0.3 }, 0.2, "Quart", "Out"):Play()
 				end)
 			end,
 			ExpectedType = "function",
@@ -1160,16 +1281,16 @@ function Library:createPicker(options: table, parent, scrollingFrame, isPickerBo
 
 		hoveringOn = {
 			Value = function()
-				Utility:tween(Submit.TextLabel, { BackgroundTransparency = 0.3 }, 0.2):Play()
-				Utility:tween(Submit.TextLabel, { TextColor3 = Theme.PrimaryColor, TextTransparency = 0.3 }, 0.2):Play()
+				Utility:tween(Submit.TextLabel, { BackgroundTransparency = 0.3 }, 0.2, "Quart", "Out"):Play()
+				Utility:tween(Submit.TextLabel, { TextColor3 = Theme.PrimaryColor, TextTransparency = 0.3 }, 0.2, "Quart", "Out"):Play()
 			end,
 			ExpectedType = "function",
 		},
 
 		hoveringOff = {
 			Value = function()
-				Utility:tween(Submit.TextLabel, { BackgroundTransparency = 0 }, 0.2):Play()
-				Utility:tween(Submit.TextLabel, { TextColor3 = Theme.SecondaryTextColor, TextTransparency = 0 }, 0.2)
+				Utility:tween(Submit.TextLabel, { BackgroundTransparency = 0 }, 0.2, "Quart", "Out"):Play()
+				Utility:tween(Submit.TextLabel, { TextColor3 = Theme.SecondaryTextColor, TextTransparency = 0 }, 0.2, "Quart", "Out")
 					:Play()
 			end,
 			ExpectedType = "function",
@@ -1218,6 +1339,7 @@ function Library:createDropdown(options: table, parent, scrollingFrame)
 		default = { Default = {}, ExpectedType = "table" },
 		multiple = { Default = false, ExpectedType = "boolean" },
 		callback = { Default = function() end, ExpectedType = "function" },
+		tooltip = { Default = "", ExpectedType = "string" },
 	})
 
 	scrollingFrame = self.ScrollingFrame or scrollingFrame
@@ -1228,6 +1350,16 @@ function Library:createDropdown(options: table, parent, scrollingFrame)
 
 	local TextLabel = Dropdown.TextLabel
 	TextLabel.Text = options.text
+
+	local tooltipConnection
+	if options.tooltip and options.tooltip ~= "" then
+		TextLabel.MouseEnter:Connect(function()
+			tooltipConnection = Library:showTooltip(TextLabel, options.tooltip)
+		end)
+		TextLabel.MouseLeave:Connect(function()
+			Library:hideTooltip(tooltipConnection)
+		end)
+	end
 
 	local ImageButton = TextLabel.ImageButton
 	local Box = Dropdown.Box
@@ -1244,7 +1376,6 @@ function Library:createDropdown(options: table, parent, scrollingFrame)
 	local DropButtons = Inner.ScrollingFrame
 	local Search = Inner.TextBox
 
-	-- Auto size ScrollingFrame and List
 	DropButtons.UIListLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
 		DropButtons.CanvasSize =
 			UDim2.new(0, 0, 0, DropButtons.UIListLayout.AbsoluteContentSize.Y + Inner.UIListLayout.Padding.Offset)
@@ -1259,7 +1390,9 @@ function Library:createDropdown(options: table, parent, scrollingFrame)
 			Utility:tween(
 				List,
 				{ Size = UDim2.new(1, 0, 0, math.clamp(Inner.UIListLayout.AbsoluteContentSize.Y, 0, 210)) },
-				0.2
+				0.2,
+				"Quart",
+				"Out"
 			):Play()
 
 			for index, value in ipairs(self.DropdownSizes) do
@@ -1275,7 +1408,6 @@ function Library:createDropdown(options: table, parent, scrollingFrame)
 		end
 	end)
 
-	-- As long we don't spam it were good i guess when changing canvassize when tweened but let's not do that
 	local function toggleList()
 		if List.Size.Y.Offset <= 0 then
 			for index, value in ipairs(Library.DropdownSizes) do
@@ -1285,7 +1417,6 @@ function Library:createDropdown(options: table, parent, scrollingFrame)
 				end
 			end
 
-			-- Hide current open dropdowns and make sure enabled dropdown is on top
 			for _, object in ipairs(scrollingFrame:GetDescendants()) do
 				if object.Name == "Section" then
 					object.ZIndex = 1
@@ -1293,14 +1424,14 @@ function Library:createDropdown(options: table, parent, scrollingFrame)
 
 				if object.Name == "List" and object ~= List then
 					object.Parent.ZIndex = 1
-					Utility:tween(object, { Size = UDim2.new(1, 0, 0, 0) }, 0.2):Play()
+					Utility:tween(object, { Size = UDim2.new(1, 0, 0, 0) }, 0.2, "Quart", "Out"):Play()
 				end
 			end
 
 			for _, object in ipairs(Popups:GetDescendants()) do
 				if object.Name == "List" and object ~= List then
 					object.Parent.ZIndex = 1
-					Utility:tween(object, { Size = UDim2.new(1, 0, 0, 0) }, 0.2):Play()
+					Utility:tween(object, { Size = UDim2.new(1, 0, 0, 0) }, 0.2, "Quart", "Out"):Play()
 				end
 			end
 
@@ -1313,7 +1444,9 @@ function Library:createDropdown(options: table, parent, scrollingFrame)
 			Utility:tween(
 				List,
 				{ Size = UDim2.new(1, 0, 0, math.clamp(Inner.UIListLayout.AbsoluteContentSize.Y, 0, 210)) },
-				0.2
+				0.2,
+				"Quart",
+				"Out"
 			):Play()
 			table.insert(Library.DropdownSizes, {
 				object = Dropdown,
@@ -1323,7 +1456,7 @@ function Library:createDropdown(options: table, parent, scrollingFrame)
 			scrollingFrame.CanvasSize = scrollingFrame.CanvasSize
 				+ UDim2.new(0, 0, 0, math.clamp(Inner.UIListLayout.AbsoluteContentSize.Y, 0, 210))
 		else
-			Utility:tween(List, { Size = UDim2.new(1, 0, 0, 0) }, 0.2):Play()
+			Utility:tween(List, { Size = UDim2.new(1, 0, 0, 0) }, 0.2, "Quart", "Out"):Play()
 
 			for index, value in ipairs(Library.DropdownSizes) do
 				if value.object == Dropdown then
@@ -1360,8 +1493,8 @@ function Library:createDropdown(options: table, parent, scrollingFrame)
 	end
 
 	local function tweenDropButton(dropButton: Instance, backgroundColor: Color3, imageTransparency: number)
-		Utility:tween(dropButton.Background, { BackgroundColor3 = backgroundColor }, 0.2, "Circular", "InOut"):Play()
-		Utility:tween(dropButton.Checkmark, { ImageTransparency = imageTransparency }, 0.3):Play()
+		Utility:tween(dropButton.Background, { BackgroundColor3 = backgroundColor }, 0.2, "Quart", "Out"):Play()
+		Utility:tween(dropButton.Checkmark, { ImageTransparency = imageTransparency }, 0.2, "Quart", "Out"):Play()
 	end
 
 	local Context = Utility:validateContext({
@@ -1392,7 +1525,6 @@ function Library:createDropdown(options: table, parent, scrollingFrame)
 
 	TextButton.MouseButton1Down:Connect(toggleList)
 
-	-- Search drop buttons function
 	Search:GetPropertyChangedSignal("Text"):Connect(function()
 		for _, dropButton in ipairs(DropButtons:GetChildren()) do
 			if not dropButton:IsA("Frame") then
@@ -1465,6 +1597,7 @@ function Library:createKeybind(options: table, parent, scrollingFrame)
 		default = { Default = "None", ExpectedType = "string" },
 		onHeld = { Default = false, ExpectedType = "boolean" },
 		callback = { Default = function() end, ExpectedType = "function" },
+		tooltip = { Default = "", ExpectedType = "string" },
 	})
 
 	scrollingFrame = self.ScrollingFrame or scrollingFrame
@@ -1476,22 +1609,22 @@ function Library:createKeybind(options: table, parent, scrollingFrame)
 	local TextLabel = Keybind.TextLabel
 	TextLabel.Text = options.text
 
+	local tooltipConnection
+	if options.tooltip and options.tooltip ~= "" then
+		TextLabel.MouseEnter:Connect(function()
+			tooltipConnection = Library:showTooltip(TextLabel, options.tooltip)
+		end)
+		TextLabel.MouseLeave:Connect(function()
+			Library:hideTooltip(tooltipConnection)
+		end)
+	end
+
 	local ImageButton = TextLabel.ImageButton
 	local Background = TextLabel.Background
 
 	local TextButton = Background.TextButton
 
 	TextButton.Text = options.default
-	-- if not table.find(self.Exclusions, options.default) then
-	-- 	TextButton.Text = options.default
-	-- else
-	-- 	TextButton.Text = "None"
-	-- 	warn("You already have this key binded")
-	-- end
-
-	-- if options.default ~= "None" then
-	-- 	table.insert(Exclusions, options.default)
-	-- end
 
 	local Context = Utility:validateContext({
 		default = { Value = options.default, ExpectedType = "string" },
@@ -1506,7 +1639,7 @@ function Library:createKeybind(options: table, parent, scrollingFrame)
 		autoSizeBackground = {
 			Value = function()
 				local TextBoundsX = math.clamp(TextButton.TextBounds.X + 14, 10, 200)
-				Utility:tween(TextButton.Parent, { Size = UDim2.fromOffset(TextBoundsX, 20) }, 0.2):Play()
+				Utility:tween(TextButton.Parent, { Size = UDim2.fromOffset(TextBoundsX, 20) }, 0.2, "Quart", "Out"):Play()
 			end,
 			ExpectedType = "function",
 		},
@@ -1543,11 +1676,11 @@ function Library:createKeybind(options: table, parent, scrollingFrame)
 	})
 end
 
--- Rushed this, later put it into a module like the other elements, even though it's simple.
 function Library:createButton(options: table, parent, scrollingFrame)
 	Utility:validateOptions(options, {
 		text = { Default = "Button", ExpectedType = "string" },
 		callback = { Default = function() end, ExpectedType = "function" },
+		tooltip = { Default = "", ExpectedType = "string" },
 	})
 
 	scrollingFrame = self.ScrollingFrame or scrollingFrame
@@ -1561,26 +1694,36 @@ function Library:createButton(options: table, parent, scrollingFrame)
 	local TextButton = Background.TextButton
 	TextButton.Text = options.text
 
-	TextButton.MouseButton1Down:Connect(function()
-		Utility:tween(Background, { BackgroundTransparency = 0 }, 0.2):Play()
-		Utility:tween(TextButton, { TextColor3 = Theme.PrimaryColor, TextTransparency = 0 }, 0.2):Play()
+	local tooltipConnection
+	if options.tooltip and options.tooltip ~= "" then
+		TextButton.MouseEnter:Connect(function()
+			tooltipConnection = Library:showTooltip(TextButton, options.tooltip)
+		end)
+		TextButton.MouseLeave:Connect(function()
+			Library:hideTooltip(tooltipConnection)
+		end)
+	end
 
-		task.delay(0.2, function()
-			Utility:tween(TextButton, { TextColor3 = Theme.SecondaryTextColor, TextTransparency = 0 }, 0.2):Play()
-			Utility:tween(Background, { BackgroundTransparency = 0.3 }, 0.2):Play()
+	TextButton.MouseButton1Down:Connect(function()
+		Utility:tween(Background, { BackgroundTransparency = 0 }, 0.15, "Quart", "Out"):Play()
+		Utility:tween(TextButton, { TextColor3 = Theme.PrimaryColor, TextTransparency = 0 }, 0.15, "Quart", "Out"):Play()
+
+		task.delay(0.15, function()
+			Utility:tween(TextButton, { TextColor3 = Theme.SecondaryTextColor, TextTransparency = 0 }, 0.15, "Quart", "Out"):Play()
+			Utility:tween(Background, { BackgroundTransparency = 0.3 }, 0.15, "Quart", "Out"):Play()
 		end)
 
 		options.callback()
 	end)
 
 	Background.MouseEnter:Connect(function(input)
-		Utility:tween(Background, { BackgroundTransparency = 0.3 }, 0.2):Play()
-		Utility:tween(TextButton, { TextColor3 = Theme.PrimaryColor, TextTransparency = 0.3 }, 0.2):Play()
+		Utility:tween(Background, { BackgroundTransparency = 0.3 }, 0.15, "Quart", "Out"):Play()
+		Utility:tween(TextButton, { TextColor3 = Theme.PrimaryColor, TextTransparency = 0.3 }, 0.15, "Quart", "Out"):Play()
 	end)
 
 	Background.MouseLeave:Connect(function()
-		Utility:tween(Background, { BackgroundTransparency = 0 }, 0.2):Play()
-		Utility:tween(TextButton, { TextColor3 = Theme.SecondaryTextColor, TextTransparency = 0 }, 0.2):Play()
+		Utility:tween(Background, { BackgroundTransparency = 0 }, 0.15, "Quart", "Out"):Play()
+		Utility:tween(TextButton, { TextColor3 = Theme.SecondaryTextColor, TextTransparency = 0 }, 0.15, "Quart", "Out"):Play()
 	end)
 
 	Theme:registerToObjects({
@@ -1589,12 +1732,12 @@ function Library:createButton(options: table, parent, scrollingFrame)
 	})
 end
 
--- Redo textbox later
 function Library:createTextBox(options: table, parent, scrollingFrame)
 	Utility:validateOptions(options, {
 		text = { Default = "Textbox", ExpectedType = "string" },
 		default = { Default = "", ExpectedType = "string" },
 		callback = { Default = function() end, ExpectedType = "function" },
+		tooltip = { Default = "", ExpectedType = "string" },
 	})
 
 	scrollingFrame = self.ScrollingFrame or scrollingFrame
@@ -1605,6 +1748,16 @@ function Library:createTextBox(options: table, parent, scrollingFrame)
 
 	local TextLabel = TextBox.TextLabel
 	TextLabel.Text = options.text
+
+	local tooltipConnection
+	if options.tooltip and options.tooltip ~= "" then
+		TextLabel.MouseEnter:Connect(function()
+			tooltipConnection = Library:showTooltip(TextLabel, options.tooltip)
+		end)
+		TextLabel.MouseLeave:Connect(function()
+			Library:hideTooltip(tooltipConnection)
+		end)
+	end
 
 	local ImageButton = TextLabel.ImageButton
 
@@ -1619,7 +1772,7 @@ function Library:createTextBox(options: table, parent, scrollingFrame)
 		autoSizeTextBox = {
 			Value = function()
 				local TextBoundsX = math.clamp(Box.TextBounds.X + 14, 0, 100)
-				Utility:tween(Box, { Size = UDim2.fromOffset(TextBoundsX, 20) }, 0.2):Play()
+				Utility:tween(Box, { Size = UDim2.fromOffset(TextBoundsX, 20) }, 0.2, "Quart", "Out"):Play()
 			end,
 			ExpectedType = "function",
 		},
@@ -1657,7 +1810,6 @@ function Library:createTextBox(options: table, parent, scrollingFrame)
 	})
 end
 
--- Later put this into a module, but this is fine if it's put here anyways.
 local ChildRemoved = false
 function Library:notify(options: table)
 	Utility:validateOptions(options, {
@@ -1683,7 +1835,6 @@ function Library:notify(options: table)
 
 	local Line = Notification.Line
 
-	-- Put transparent objects to not be visible to make cool effect
 	local NotificationTransparentObjects = Utility:getTransparentObjects(Notification)
 
 	for _, data in ipairs(NotificationTransparentObjects) do
@@ -1692,12 +1843,11 @@ function Library:notify(options: table)
 
 	Notification.BackgroundTransparency = 1
 
-	-- Get back NotificationTransparentObjects again and make it visible now with cool effect!!
 	for _, data in ipairs(NotificationTransparentObjects) do
-		Utility:tween(data.object, { [data.property] = 0 }, 0.2):Play()
+		Utility:tween(data.object, { [data.property] = 0 }, 0.25, "Quart", "Out"):Play()
 	end
 
-	Utility:tween(Notification, { ["BackgroundTransparency"] = 0 }, 0.2):Play()
+	Utility:tween(Notification, { ["BackgroundTransparency"] = 0 }, 0.25, "Quart", "Out"):Play()
 
 	local notificationPosition = -24
 	local notificationSize = 0
@@ -1706,58 +1856,50 @@ function Library:notify(options: table)
 	for index, notification in ipairs(ScreenGui.Notifications:GetChildren()) do
 		if index == 1 then
 			notificationSize = notification.AbsoluteSize.Y
-			Utility:tween(notification, { Position = UDim2.new(1, -24, 1, notificationPosition) }, 0.2):Play()
+			Utility:tween(notification, { Position = UDim2.new(1, -24, 1, notificationPosition) }, 0.2, "Quart", "Out"):Play()
 			continue
 		end
 
-		-- Current notification position
 		notificationPosition -= notificationSize + PADDING_Y
-		-- Update notification size for next time to get proper position
 		notificationSize = notification.Size.Y.Offset
 		Notification.Position = UDim2.new(1, Notification.Position.X.Offset, 1, notificationPosition)
 	end
 
-	-- Update notification position when notification is removed
 	if not ChildRemoved then
 		ScreenGui.Notifications.ChildRemoved:Connect(function(child)
 			for index, notification in ipairs(ScreenGui.Notifications:GetChildren()) do
 				if index == 1 then
 					notificationPosition = -14
 					notificationSize = notification.AbsoluteSize.Y
-					Utility:tween(notification, { Position = UDim2.new(1, -24, 1, notificationPosition) }, 0.2):Play()
+					Utility:tween(notification, { Position = UDim2.new(1, -24, 1, notificationPosition) }, 0.2, "Quart", "Out"):Play()
 					continue
 				end
 
-				-- Current notification position
 				notificationPosition -= notificationSize + PADDING_Y
-				-- Update notification size for next time to get proper position
 				notificationSize = notification.AbsoluteSize.Y
-				Utility:tween(notification, { Position = UDim2.new(1, -24, 1, notificationPosition) }, 0.2):Play()
+				Utility:tween(notification, { Position = UDim2.new(1, -24, 1, notificationPosition) }, 0.2, "Quart", "Out"):Play()
 			end
 		end)
 
 		ChildRemoved = true
 	end
 
-	-- Auto remove notification after a delay
 	task.delay(options.duration, function()
 		if Notification then
 			for _, data in ipairs(Utility:getTransparentObjects(Notification)) do
-				Utility:tween(data.object, { [data.property] = 1 }, 0.2):Play()
+				Utility:tween(data.object, { [data.property] = 1 }, 0.2, "Quart", "Out"):Play()
 			end
 
-			Utility:tween(Notification, { ["BackgroundTransparency"] = 1 }, 0.2):Play()
+			Utility:tween(Notification, { ["BackgroundTransparency"] = 1 }, 0.2, "Quart", "Out"):Play()
 
 			task.wait(0.2)
 			Notification:Destroy()
 		end
 	end)
 
-	-- Show notification
-	Utility:tween(Notification, { Position = UDim2.new(1, -24, 1, notificationPosition) }, 0.2):Play()
+	Utility:tween(Notification, { Position = UDim2.new(1, -24, 1, notificationPosition) }, 0.2, "Quart", "Out"):Play()
 	task.wait(0.2)
 
-	-- Register to Theme
 	Theme:registerToObjects({
 		{ object = Notification, property = "BackgroundColor3", theme = { "SecondaryBackgroundColor" } },
 		{ object = Title, property = "BackgroundColor3", theme = { "PrimaryBackgroundColor" } },
@@ -1775,7 +1917,6 @@ function Library:ToggleUI(state)
     end
 end
 
--- Save Manager, Theme Manager, UI settings
 function Library:createManager(options: table)
 	Utility:validateOptions(options, {
 		folderName = { Default = "Leny", ExpectedType = "string" },
@@ -1804,6 +1945,31 @@ function Library:createManager(options: table)
 		end
 
 		return themeJsons
+	end
+	
+	-- Function to fetch theme presets from GitHub
+	local function getThemePresets()
+		local success, result = pcall(function()
+			local response = game:HttpGet("https://api.github.com/repos/DontGho/userinterface/contents")
+			local decoded = game:GetService("HttpService"):JSONDecode(response)
+			local presets = {}
+			
+			for _, file in ipairs(decoded) do
+				if file.type == "file" and string.match(file.name, ".json$") then
+					local name = string.gsub(file.name, ".json", "")
+					table.insert(presets, name)
+				end
+			end
+			
+			return presets
+		end)
+		
+		if success then
+			return result
+		else
+			warn("Failed to fetch theme presets from GitHub:", result)
+			return {}
+		end
 	end
 
 	local function getSavedData()
@@ -1900,15 +2066,28 @@ function Library:createManager(options: table)
 	end
 
 	local function loadSaveConfig(fileName: string)
-		local decoded = game:GetService("HttpService")
-			:JSONDecode(readfile(options.folderName .. "/" .. fileName .. ".json"))
+		if not fileName or fileName == "" then
+			return
+		end
+		
+		local filePath = options.folderName .. "/" .. fileName .. ".json"
+		if not isfile(filePath) then
+			return
+		end
+		
+		local decoded = game:GetService("HttpService"):JSONDecode(readfile(filePath))
 
 		for elementType, elementData in pairs(shared.Flags) do
 			for elementName, _ in pairs(elementData) do
-				if elementType == "Dropdown" and decoded.Dropdown[elementName] and shared.Flags.Dropdown[elementName] and elementName ~= "Configs" then
+				if elementType == "Dropdown" and decoded.Dropdown[elementName] and shared.Flags.Dropdown[elementName] and elementName ~= "Configs" and elementName ~= "Theme Configs" and elementName ~= "Theme Presets" then
+					-- Ensure value is a table
+					local defaultValue = decoded.Dropdown[elementName].value
+					if type(defaultValue) ~= "table" then
+						defaultValue = {defaultValue}
+					end
 					shared.Flags.Dropdown[elementName]:updateList({
 						list = decoded.Dropdown[elementName].list,
-						default = decoded.Dropdown[elementName].value,
+						default = defaultValue,
 					})
 				end
 
@@ -1937,16 +2116,47 @@ function Library:createManager(options: table)
 		end
 	end
 
-	local function loadThemeConfig(fileName: string)
-		local decoded = game:GetService("HttpService")
-			:JSONDecode(readfile(options.folderName .. "/" .. "Theme/" .. fileName .. ".json"))
+	local function loadThemeConfig(fileName: string, isGitHub: boolean)
+		if not fileName or fileName == "" then
+			return
+		end
+		
+		local decoded
+		local success, err = pcall(function()
+			if isGitHub then
+				-- URL encode the filename to handle spaces and special characters
+				local encodedFileName = game:GetService("HttpService"):UrlEncode(fileName)
+				local url = "https://raw.githubusercontent.com/DontGho/userinterface/refs/heads/main/" .. encodedFileName .. ".json"
+				local response = game:HttpGet(url)
+				decoded = game:GetService("HttpService"):JSONDecode(response)
+			else
+				local filePath = options.folderName .. "/Theme/" .. fileName .. ".json"
+				if not isfile(filePath) then
+					error("File does not exist: " .. filePath)
+				end
+				decoded = game:GetService("HttpService"):JSONDecode(readfile(filePath))
+			end
+		end)
+		
+		if not success then
+			warn("Failed to load theme config:", err)
+			return
+		end
+		
+		if not decoded or not decoded.ColorPicker then
+			warn("Invalid theme config format")
+			return
+		end
 
 		for elementType, elementData in pairs(shared.Flags) do
 			for elementName, _ in pairs(elementData) do
 				if elementType == "ColorPicker" and decoded.ColorPicker[elementName] and shared.Flags.ColorPicker[elementName] then
-					shared.Flags.ColorPicker[elementName]:updateColor({
-						color = Color3.fromRGB(unpack(decoded.ColorPicker[elementName].color)),
-					})
+					local colorData = decoded.ColorPicker[elementName].color
+					if colorData and #colorData == 3 then
+						shared.Flags.ColorPicker[elementName]:updateColor({
+							color = Color3.fromRGB(unpack(colorData)),
+						})
+					end
 				end
 			end
 		end
@@ -1959,37 +2169,30 @@ function Library:createManager(options: table)
 	local ThemeManager = Page:createSection({ position = "Right", text = "Theme Manager" })
 
 	function createNaturalRainbowEffect(titleIcon)
-		-- Clean up existing connection
 		if rainbowConnection then
 			rainbowConnection:Disconnect()
 			rainbowConnection = nil
 		end
 		
-		-- Get the original color to maintain saturation and value
 		local originalColor = Library.Theme.PrimaryTextColor
 		local h, s, v = originalColor:ToHSV()
 		
-		-- Store original saturation and value for natural cycling
-		local originalSaturation = math.max(s, 0.8) -- Ensure minimum saturation for vibrant colors
-		local originalValue = math.max(v, 0.9) -- Ensure brightness
+		local originalSaturation = math.max(s, 0.8)
+		local originalValue = math.max(v, 0.9)
 		
 		local startTime = tick()
-		local cycleDuration = 4 -- 4 seconds for full hue cycle
+		local cycleDuration = 4
 		
-		-- Create the smooth hue cycling connection
 		rainbowConnection = game:GetService("RunService").Heartbeat:Connect(function()
 			local elapsed = tick() - startTime
 			local progress = (elapsed % cycleDuration) / cycleDuration
 			
-			-- Smooth hue cycling from 0 to 1 (full spectrum)
 			local currentHue = progress
 			
-			-- Create color with cycled hue but original saturation/value
 			local newColor = Color3.fromHSV(currentHue, originalSaturation, originalValue)
 			titleIcon.ImageColor3 = newColor
 		end)
 		
-		-- Store connection for cleanup
 		table.insert(Connections, {
 			Disconnect = function()
 				if rainbowConnection then
@@ -2005,28 +2208,31 @@ function Library:createManager(options: table)
 			rainbowConnection:Disconnect()
 			rainbowConnection = nil
 		end
-		local h,s,v = Library.Theme.PrimaryTextColor:ToHSV()
-		titleIcon.ImageColor3 = Color3.fromHSV(h, s, math.min(1, v + 0.3))
+		titleIcon.ImageColor3 = Library.Theme.PrimaryTextColor
+		
+		-- Re-register to theme so it updates with theme changes
+		Theme:registerToObjects({
+			{ object = titleIcon, property = "ImageColor3", theme = { "PrimaryTextColor" } },
+		})
 	end
 
-
-	-- Updated toggle for the rainbow icon effect
-	UI:createToggle({
-		text = "Rainbow Icon",
-		state = false,
-		callback = function(state)
-			local TitleIcon = Title:FindFirstChild("TitleIcon")
-			if TitleIcon then
-				if state then
-					-- Enable natural rainbow hue cycling effect
-					createNaturalRainbowEffect(TitleIcon)
-				else
-					-- Disable rainbow effect and restore theme color
-					stopRainbowEffect(TitleIcon)
+	-- Only show Rainbow Icon toggle if user is not poor
+	if not UserIsPoor then
+		UI:createToggle({
+			text = "Rainbow Icon",
+			state = false,
+			callback = function(state)
+				local TitleIcon = Title:FindFirstChild("TitleIcon")
+				if TitleIcon then
+					if state then
+						createNaturalRainbowEffect(TitleIcon)
+					else
+						stopRainbowEffect(TitleIcon)
+					end
 				end
-			end
-		end,
-	})
+			end,
+		})
+	end
 
 	UI:createPicker({
 		text = "SecondaryTextColor",
@@ -2123,7 +2329,6 @@ function Library:createManager(options: table)
 		end,
 	})
 
-	-- File system
 	if not isfolder(options.folderName) then
 		makefolder(options.folderName)
 	end
@@ -2132,9 +2337,42 @@ function Library:createManager(options: table)
 		makefolder(options.folderName .. "/Theme")
 	end
 
-	local configName = SaveManager:createTextBox({ text = "Config Name" })
 	local jsons = getJsons()
 
+	-- LOAD/MANAGE CONFIGS (most commonly used)
+	local Configs = SaveManager:createDropdown({ text = "Configs", list = jsons })
+
+	SaveManager:createButton({
+		text = "Load Config",
+		callback = function()
+			local configValue = Configs:getValue()
+			-- Handle both string and table returns from getValue
+			if type(configValue) == "table" then
+				configValue = configValue[1] or ""
+			end
+			if configValue and configValue ~= "" and configValue ~= "None" then
+				loadSaveConfig(configValue)
+			end
+		end,
+	})
+
+	SaveManager:createButton({
+		text = "Set as Auto Load",
+		callback = function()
+			local configValue = Configs:getValue()
+			-- Handle both string and table returns from getValue
+			if type(configValue) == "table" then
+				configValue = configValue[1] or ""
+			end
+			if configValue and configValue ~= "" and configValue ~= "None" then
+				writefile(options.folderName .. "/autoload.txt", configValue)
+			end
+		end,
+	})
+
+	-- CREATE/SAVE CONFIGS
+	local configName = SaveManager:createTextBox({ text = "Config Name" })
+	
 	SaveManager:createButton({
 		text = "Create Config",
 		callback = function()
@@ -2151,29 +2389,35 @@ function Library:createManager(options: table)
 		end,
 	})
 
-	local Configs = SaveManager:createDropdown({ text = "Configs", list = jsons })
-
 	SaveManager:createButton({
 		text = "Save/Overwrite Config",
 		callback = function()
+			local configValue = Configs:getValue()
+			-- Handle both string and table returns from getValue
+			if type(configValue) == "table" then
+				configValue = configValue[1] or ""
+			end
+			if not configValue or configValue == "" or configValue == "None" then
+				return
+			end
 			local SavedData = getSavedData()
 			local encoded = game:GetService("HttpService"):JSONEncode(SavedData)
-			writefile(options.folderName .. "/" .. Configs:getValue() .. ".json", encoded)
-			Configs:updateList({ list = getJsons(), default = { Configs:getValue() } })
+			writefile(options.folderName .. "/" .. configValue .. ".json", encoded)
+			Configs:updateList({ list = getJsons(), default = { configValue } })
 		end,
 	})
 
 	SaveManager:createButton({
-		text = "Load Config",
-		callback = function()
-			loadSaveConfig(Configs:getValue())
-		end,
-	})
-
-	SaveManager:createButton({
-	text = "Delete Saved Config",
+		text = "Delete Saved Config",
 		callback = function()
 			local configToDelete = Configs:getValue()
+			-- Handle both string and table returns from getValue
+			if type(configToDelete) == "table" then
+				configToDelete = configToDelete[1] or ""
+			end
+			if not configToDelete or configToDelete == "" or configToDelete == "None" then
+				return
+			end
 			local filePath = options.folderName .. "/" .. configToDelete .. ".json"
 			if isfile and delfile and isfile(filePath) then
 				delfile(filePath)
@@ -2182,20 +2426,60 @@ function Library:createManager(options: table)
 		end,
 	})
 
-	-- Auto load
-	SaveManager:createButton({
-		text = "Set as Auto Load",
+	if isfile(options.folderName .. "/autoload.txt") then
+		local autoloadConfig = readfile(options.folderName .. "/autoload.txt")
+		if autoloadConfig and autoloadConfig ~= "" then
+			loadSaveConfig(autoloadConfig)
+		end
+	end
+
+	-- THEME PRESETS SECTION (from GitHub - most commonly used)
+	local ThemePresets = ThemeManager:createDropdown({
+		text = "Theme Presets",
+		list = getThemePresets(),
+	})
+
+	ThemeManager:createButton({
+		text = "Load Theme Preset",
 		callback = function()
-			writefile(options.folderName .. "/autoload.txt", Configs:getValue())
+			local presetValue = ThemePresets:getValue()
+			-- Handle both string and table returns from getValue
+			if type(presetValue) == "table" then
+				presetValue = presetValue[1] or ""
+			end
+			if presetValue and presetValue ~= "" and presetValue ~= "None" then
+				loadThemeConfig(presetValue, true)
+			end
+		end,
+	})
+	
+	ThemeManager:createButton({
+		text = "Refresh Presets",
+		callback = function()
+			ThemePresets:updateList({ 
+				list = getThemePresets(), 
+				default = {} 
+			})
+		end,
+	})
+	
+	ThemeManager:createButton({
+		text = "Set Preset Auto Load",
+		callback = function()
+			local presetValue = ThemePresets:getValue()
+			-- Handle both string and table returns from getValue
+			if type(presetValue) == "table" then
+				presetValue = presetValue[1] or ""
+			end
+			if presetValue and presetValue ~= "" and presetValue ~= "None" then
+				writefile(options.folderName .. "/presetautoload.txt", presetValue)
+			end
 		end,
 	})
 
-	if isfile(options.folderName .. "/autoload.txt") then
-		loadSaveConfig(readfile(options.folderName .. "/autoload.txt"))
-	end
-
+	-- LOCAL THEME CONFIGS SECTION (your saved themes)
 	local themeConfigName = ThemeManager:createTextBox({ text = "Theme Config Name" })
-
+	
 	ThemeManager:createButton({
 		text = "Create Theme Config",
 		callback = function()
@@ -2218,26 +2502,70 @@ function Library:createManager(options: table)
 	})
 
 	ThemeManager:createButton({
-		text = "Save Theme Config",
+		text = "Load Theme Config",
 		callback = function()
-			local ThemeData = getThemeData()
-			local encoded = game:GetService("HttpService"):JSONEncode(ThemeData)
-			writefile(options.folderName .. "/" .. "Theme/" .. ThemeConfigs:getValue() .. ".json", encoded)
-			ThemeConfigs:updateList({ list = getThemeJsons(), default = { ThemeConfigs:getValue() } })
+			local themeValue = ThemeConfigs:getValue()
+			-- Handle both string and table returns from getValue
+			if type(themeValue) == "table" then
+				themeValue = themeValue[1] or ""
+			end
+			if themeValue and themeValue ~= "" and themeValue ~= "None" then
+				loadThemeConfig(themeValue, false)
+			end
 		end,
 	})
 
 	ThemeManager:createButton({
-		text = "Load Theme Config",
+		text = "Save Theme Config",
 		callback = function()
-			loadThemeConfig(ThemeConfigs:getValue())
+			local themeValue = ThemeConfigs:getValue()
+			-- Handle both string and table returns from getValue
+			if type(themeValue) == "table" then
+				themeValue = themeValue[1] or ""
+			end
+			if not themeValue or themeValue == "" or themeValue == "None" then
+				return
+			end
+			local ThemeData = getThemeData()
+			local encoded = game:GetService("HttpService"):JSONEncode(ThemeData)
+			writefile(options.folderName .. "/" .. "Theme/" .. themeValue .. ".json", encoded)
+			ThemeConfigs:updateList({ list = getThemeJsons(), default = { themeValue } })
 		end,
 	})
+	
+	ThemeManager:createButton({
+		text = "Set Config Auto Load",
+		callback = function()
+			local themeValue = ThemeConfigs:getValue()
+			-- Handle both string and table returns from getValue
+			if type(themeValue) == "table" then
+				themeValue = themeValue[1] or ""
+			end
+			if themeValue and themeValue ~= "" and themeValue ~= "None" then
+				writefile(options.folderName .. "/themeautoload.txt", themeValue)
+			end
+		end,
+	})
+	
+	-- Auto-load preset from GitHub if set
+	if isfile(options.folderName .. "/presetautoload.txt") then
+		local autoloadPreset = readfile(options.folderName .. "/presetautoload.txt")
+		if autoloadPreset and autoloadPreset ~= "" then
+			loadThemeConfig(autoloadPreset, true)
+		end
+	end
+	
+	-- Auto-load local theme config if set
+	if isfile(options.folderName .. "/themeautoload.txt") then
+		local autoloadTheme = readfile(options.folderName .. "/themeautoload.txt")
+		if autoloadTheme and autoloadTheme ~= "" then
+			loadThemeConfig(autoloadTheme, false)
+		end
+	end
 
 	self.managerCreated = true
 end
 
--- Set users theme choice or default theme when initiliazed, could make this cleaner lol, but nah.
 Theme:registerToObjects({
 	{ object = Glow, property = "ImageColor3", theme = { "PrimaryBackgroundColor" } },
 	{ object = Background, property = "BackgroundColor3", theme = { "SecondaryBackgroundColor" } },
@@ -2248,11 +2576,9 @@ Theme:registerToObjects({
 	{ object = Assets.Pages.Fade, property = "BackgroundColor3", theme = { "PrimaryBackgroundColor" } },
 })
 
--- Make UI Draggable and Resizable
 Utility:draggable(Library, Glow)
 Utility:resizable(Library, Glow.Background.Pages.Resize, Glow)
 
--- Clean up Addon objects with no Addons
 task.spawn(function()
 	while not Library.managerCreated do
 		task.wait()
