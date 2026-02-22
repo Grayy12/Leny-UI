@@ -46,6 +46,10 @@ local Library = {
 	Theme = {},
 	DropdownSizes = {},
 	TooltipInstance = nil,
+	TooltipShowId = 0,
+	TooltipMoveConnection = nil,
+	TooltipTweens = {},
+	IconVisible = true,
 }
 Library.__index = Library
 
@@ -193,17 +197,38 @@ function Library:createTooltip()
 	return Tooltip
 end
 
+function Library:cancelTooltipTweens()
+	for _, tween in ipairs(Library.TooltipTweens) do
+		tween:Cancel()
+	end
+	Library.TooltipTweens = {}
+end
+
 function Library:showTooltip(element, text)
 	if not text or text == "" then return end
 
 	local Tooltip = Library:createTooltip()
 	local TextLabel = Tooltip.Text
 
+	-- Bump ID so any pending hide callback gets cancelled
+	Library.TooltipShowId = Library.TooltipShowId + 1
+
+	-- Kill any running fade-out tweens immediately
+	Library:cancelTooltipTweens()
+
+	-- Disconnect old move connection if any
+	if Library.TooltipMoveConnection then
+		Library.TooltipMoveConnection:Disconnect()
+		Library.TooltipMoveConnection = nil
+	end
+
 	TextLabel.Text = text
 	local textSize = TextService:GetTextSize(text, 13, Enum.Font.Gotham, Vector2.new(300, 1000))
 	Tooltip.Size = UDim2.fromOffset(textSize.X + 16, textSize.Y + 12)
-	Tooltip.BackgroundTransparency = 1
-	TextLabel.TextTransparency = 1
+
+	-- Snap fully visible instantly
+	Tooltip.BackgroundTransparency = 0
+	TextLabel.TextTransparency = 0
 
 	local function updatePosition()
 		local mousePos = UserInputService:GetMouseLocation()
@@ -215,34 +240,57 @@ function Library:showTooltip(element, text)
 	updatePosition()
 	Tooltip.Visible = true
 
-	Utility:tween(Tooltip, { BackgroundTransparency = 0 }, 0.15, "Quart", "Out"):Play()
-	Utility:tween(TextLabel, { TextTransparency = 0 }, 0.15, "Quart", "Out"):Play()
-
-	local moveConnection
-	moveConnection = UserInputService.InputChanged:Connect(function(input)
+	local moveConnection = UserInputService.InputChanged:Connect(function(input)
 		if input.UserInputType == Enum.UserInputType.MouseMovement then
 			updatePosition()
 		end
 	end)
 
+	Library.TooltipMoveConnection = moveConnection
 	table.insert(Connections, moveConnection)
-	return moveConnection
 end
 
-function Library:hideTooltip(connection)
+function Library:hideTooltip()
 	if not Library.TooltipInstance then return end
 
 	local Tooltip = Library.TooltipInstance
 	local TextLabel = Tooltip.Text
+	local hideId = Library.TooltipShowId
 
-	Utility:tween(Tooltip, { BackgroundTransparency = 1 }, 0.1, "Quart", "Out"):Play()
-	Utility:tween(TextLabel, { TextTransparency = 1 }, 0.1, "Quart", "Out"):Play()
+	-- Cancel any previous tweens before starting new fade-out
+	Library:cancelTooltipTweens()
 
-	task.wait(0.1)
-	Tooltip.Visible = false
+	local t1 = Utility:tween(Tooltip, { BackgroundTransparency = 1 }, 0.1, "Quart", "Out")
+	local t2 = Utility:tween(TextLabel, { TextTransparency = 1 }, 0.1, "Quart", "Out")
+	t1:Play()
+	t2:Play()
+	Library.TooltipTweens = { t1, t2 }
 
-	if connection then
-		connection:Disconnect()
+	task.delay(0.1, function()
+		if Library.TooltipShowId == hideId then
+			Tooltip.Visible = false
+
+			if Library.TooltipMoveConnection then
+				Library.TooltipMoveConnection:Disconnect()
+				Library.TooltipMoveConnection = nil
+			end
+		end
+	end)
+end
+
+function Library:forceHideTooltip()
+	if not Library.TooltipInstance then return end
+
+	Library.TooltipShowId = Library.TooltipShowId + 1
+	Library:cancelTooltipTweens()
+
+	Library.TooltipInstance.BackgroundTransparency = 1
+	Library.TooltipInstance.Text.TextTransparency = 1
+	Library.TooltipInstance.Visible = false
+
+	if Library.TooltipMoveConnection then
+		Library.TooltipMoveConnection:Disconnect()
+		Library.TooltipMoveConnection = nil
 	end
 end
 
@@ -350,9 +398,16 @@ function Library.new(options)
 	Library.Theme.PrimaryColor = options.PrimaryColor
 	Library.Theme.ScrollingBarImageColor = options.ScrollingBarImageColor
 	Library.Theme.Line = options.Line
+	Library.Title = options.title
 
 	ScreenGui.Enabled = true
-	
+
+	-- Intro animation: scale up with bounce
+	Glow.Size = UDim2.fromOffset(options.sizeX * 0.93, options.sizeY * 0.93)
+	Utility:tween(Glow, {
+		Size = UDim2.fromOffset(options.sizeX, options.sizeY),
+	}, 0.4, "Back", "Out"):Play()
+
 	local rainbowConnection = nil
 	
 	local function createNaturalRainbowEffect(titleIcon)
@@ -627,10 +682,12 @@ function Library:createTab(options: table)
 		imageTransparency: number
 	)
 		Utility
-			:tween(tab, { BackgroundColor3 = backgroundColor3, BackgroundTransparency = backgroundTransparency }, 0.3, "Quart", "Out")
+			:tween(tab, { BackgroundColor3 = backgroundColor3, BackgroundTransparency = backgroundTransparency }, 0.25, "Back", "Out")
 			:Play()
-		Utility:tween(icon, { ImageTransparency = imageTransparency, ImageColor3 = color }, 0.3, "Quart", "Out"):Play()
-		Utility:tween(textButton, { TextColor3 = color, TextTransparency = textTransparency }, 0.3, "Quart", "Out"):Play()
+		Utility:tween(textButton, { TextColor3 = color, TextTransparency = textTransparency }, 0.2, "Quart", "Out"):Play()
+		task.delay(0.03, function()
+			Utility:tween(icon, { ImageTransparency = imageTransparency, ImageColor3 = color }, 0.25, "Quart", "Out"):Play()
+		end)
 	end
 
 	local function fadeAnimation()
@@ -640,16 +697,16 @@ function Library:createTab(options: table)
 			textTransparency: number,
 			paddingY: number
 		)
-			Utility:tween(fade, { BackgroundTransparency = backgroundTransparency }, 0.25, "Quart", "Out"):Play()
-			Utility:tween(CurrentTabLabel.UIPadding, { PaddingBottom = UDim.new(0, paddingY) }, 0.25, "Quart", "Out"):Play()
+			Utility:tween(fade, { BackgroundTransparency = backgroundTransparency }, 0.3, "Quint", "Out"):Play()
+			Utility:tween(CurrentTabLabel.UIPadding, { PaddingBottom = UDim.new(0, paddingY) }, 0.3, "Back", "Out"):Play()
 		end
 
 		for _, subPage in ipairs(Page:GetChildren()) do
 			if subPage.Name == "SubPage" and subPage.Visible and subPage:FindFirstChild("ScrollingFrame") then
-				Utility:tween(subPage.ScrollingFrame.UIPadding, { PaddingTop = UDim.new(0, 10) }, 0.2, "Quart", "Out"):Play()
+				Utility:tween(subPage.ScrollingFrame.UIPadding, { PaddingTop = UDim.new(0, 6) }, 0.15, "Quart", "Out"):Play()
 
-				task.delay(0.2, function()
-					Utility:tween(subPage.ScrollingFrame.UIPadding, { PaddingTop = UDim.new(0, 0) }, 0.2, "Quart", "Out"):Play()
+				task.delay(0.15, function()
+					Utility:tween(subPage.ScrollingFrame.UIPadding, { PaddingTop = UDim.new(0, 0) }, 0.25, "Back", "Out"):Play()
 				end)
 			end
 		end
@@ -659,11 +716,11 @@ function Library:createTab(options: table)
 		Fade.Visible = true
 		Fade.Parent = Background.Pages
 
-		tweenFadeAndPage(Fade, 0, 1, 14)
+		tweenFadeAndPage(Fade, 0, 1, 10)
 
-		task.delay(0.25, function()
+		task.delay(0.3, function()
 			tweenFadeAndPage(Fade, 1, 0, 0)
-			task.wait(0.25)
+			task.wait(0.3)
 			Fade:Destroy()
 		end)
 	end
@@ -801,14 +858,14 @@ function Library:createSubTab(options: table)
 		textTransparency: number,
 		disableUnderlineTween: boolean
 	)
-		Utility:tween(subTab, { TextColor3 = textColor, TextTransparency = textTransparency }, 0.25, "Quart", "Out"):Play()
+		Utility:tween(subTab, { TextColor3 = textColor, TextTransparency = textTransparency }, 0.2, "Quart", "Out"):Play()
 
 		if not disableUnderlineTween then
 			Utility:tween(underline, {
 				BackgroundColor3 = Theme.PrimaryColor,
 				Position = UDim2.new(0, subTabPosition, 1, 0),
 				Size = UDim2.new(0, subTab.Size.X.Offset, 0, 2),
-			}, 0.25, "Quart", "Out"):Play()
+			}, 0.3, "Back", "Out"):Play()
 		end
 	end
 
@@ -949,7 +1006,6 @@ function Library:createToggle(options: table, parent, scrollingFrame)
 	local Toggle = Assets.Elements.Toggle:Clone()
 	Toggle.Visible = true
 	Toggle.Parent = parent or self.Section
-
 	local TextLabel = Toggle.TextLabel
 	TextLabel.Text = options.text
 
@@ -958,13 +1014,12 @@ function Library:createToggle(options: table, parent, scrollingFrame)
 	local Background = TextButton.Background
 	local Circle = Background.Circle
 
-	local tooltipConnection
 	if options.tooltip and options.tooltip ~= "" then
 		TextLabel.MouseEnter:Connect(function()
-			tooltipConnection = Library:showTooltip(TextLabel, options.tooltip)
+			Library:showTooltip(TextLabel, options.tooltip)
 		end)
 		TextLabel.MouseLeave:Connect(function()
-			Library:hideTooltip(tooltipConnection)
+			Library:hideTooltip()
 		end)
 	end
 
@@ -975,7 +1030,7 @@ function Library:createToggle(options: table, parent, scrollingFrame)
 		position: UDim2
 	)
 		Utility:tween(Background, { BackgroundColor3 = backgroundColor }, 0.25, "Quart", "Out"):Play()
-		Utility:tween(Circle, { BackgroundColor3 = circleColor, AnchorPoint = anchorPoint, Position = position }, 0.25, "Quart", "Out")
+		Utility:tween(Circle, { BackgroundColor3 = circleColor, AnchorPoint = anchorPoint, Position = position }, 0.3, "Back", "Out")
 			:Play()
 	end
 
@@ -1025,7 +1080,7 @@ function Library:createToggle(options: table, parent, scrollingFrame)
 			theme = { "TertiaryBackgroundColor", "PrimaryBackgroundColor" },
 			circleOn = circleOn,
 		},
-		{ object = ImageButton, property = "ImageColor3", theme = { "SecondaryTextColor" } },
+		{ object = ImageButton, property = "ImageColor3", theme = { "PrimaryColor" } },
 	})
 
 	shared.Flags.Toggle[options.text] = {
@@ -1066,7 +1121,6 @@ function Library:createSlider(options: table, parent, scrollingFrame)
 	local Slider = Assets.Elements.Slider:Clone()
 	Slider.Visible = true
 	Slider.Parent = parent or self.Section
-
 	local TextLabel = Slider.TextButton.TextLabel
 	local ImageButton = TextLabel.ImageButton
 	local TextBox = TextLabel.TextBox
@@ -1078,13 +1132,12 @@ function Library:createSlider(options: table, parent, scrollingFrame)
 	local TextLabel = TextButton.TextLabel
 	TextLabel.Text = options.text
 
-	local tooltipConnection
 	if options.tooltip and options.tooltip ~= "" then
 		TextLabel.MouseEnter:Connect(function()
-			tooltipConnection = Library:showTooltip(TextLabel, options.tooltip)
+			Library:showTooltip(TextLabel, options.tooltip)
 		end)
 		TextLabel.MouseLeave:Connect(function()
-			Library:hideTooltip(tooltipConnection)
+			Library:hideTooltip()
 		end)
 	end
 
@@ -1094,11 +1147,12 @@ function Library:createSlider(options: table, parent, scrollingFrame)
 
 	local function tweenSliderInfoAssets(transparency: number)
 		local TextBoundsX = math.clamp(CurrentValueLabel.TextBounds.X + 14, 10, 200)
+		local easing = transparency == 0 and "Back" or "Quart"
 		Utility:tween(CurrentValueLabel, {
 			Size = UDim2.fromOffset(TextBoundsX, 20),
 			BackgroundTransparency = transparency,
 			TextTransparency = transparency,
-		}, 0.2, "Quart", "Out"):Play()
+		}, 0.2, easing, "Out"):Play()
 	end
 
 	local Context = Utility:validateContext({
@@ -1151,7 +1205,7 @@ function Library:createSlider(options: table, parent, scrollingFrame)
 		{ object = Line, property = "BackgroundColor3", theme = { "SecondaryBackgroundColor" } },
 		{ object = Fill, property = "BackgroundColor3", theme = { "PrimaryColor" } },
 		{ object = Circle, property = "BackgroundColor3", theme = { "PrimaryColor" } },
-		{ object = ImageButton, property = "ImageColor3", theme = { "SecondaryTextColor" } },
+		{ object = ImageButton, property = "ImageColor3", theme = { "PrimaryColor" } },
 		{ object = TextBox, property = "BackgroundColor3", theme = { "SecondaryBackgroundColor" } },
 		{ object = TextBox, property = "TextColor3", theme = { "SecondaryTextColor" } },
 		{ object = CurrentValueLabel, property = "TextColor3", theme = { "TertiaryBackgroundColor" } },
@@ -1201,17 +1255,15 @@ function Library:createPicker(options: table, parent, scrollingFrame, isPickerBo
 	local Picker = Assets.Elements.Picker:Clone()
 	Picker.Visible = true
 	Picker.Parent = parent or self.Section
-
 	local TextLabel = Picker.TextLabel
 	TextLabel.Text = options.text
 
-	local tooltipConnection
 	if options.tooltip and options.tooltip ~= "" then
 		TextLabel.MouseEnter:Connect(function()
-			tooltipConnection = Library:showTooltip(TextLabel, options.tooltip)
+			Library:showTooltip(TextLabel, options.tooltip)
 		end)
 		TextLabel.MouseLeave:Connect(function()
-			Library:hideTooltip(tooltipConnection)
+			Library:hideTooltip()
 		end)
 	end
 
@@ -1300,7 +1352,7 @@ function Library:createPicker(options: table, parent, scrollingFrame, isPickerBo
 	Theme:registerToObjects({
 		{ object = TextLabel, property = "TextColor3", theme = { "SecondaryTextColor" } },
 		{ object = ColorPicker, property = "BackgroundColor3", theme = { "Line" } },
-		{ object = ImageButton, property = "ImageColor3", theme = { "SecondaryTextColor" } },
+		{ object = ImageButton, property = "ImageColor3", theme = { "PrimaryColor" } },
 		{ object = Inner, property = "BackgroundColor3", theme = { "PrimaryBackgroundColor" } },
 		{ object = Submit, property = "BackgroundColor3", theme = { "SecondaryBackgroundColor" } },
 		{ object = Hex, property = "BackgroundColor3", theme = { "SecondaryBackgroundColor" } },
@@ -1347,17 +1399,15 @@ function Library:createDropdown(options: table, parent, scrollingFrame)
 	local Dropdown = Assets.Elements.Dropdown:Clone()
 	Dropdown.Visible = true
 	Dropdown.Parent = parent or self.Section
-
 	local TextLabel = Dropdown.TextLabel
 	TextLabel.Text = options.text
 
-	local tooltipConnection
 	if options.tooltip and options.tooltip ~= "" then
 		TextLabel.MouseEnter:Connect(function()
-			tooltipConnection = Library:showTooltip(TextLabel, options.tooltip)
+			Library:showTooltip(TextLabel, options.tooltip)
 		end)
 		TextLabel.MouseLeave:Connect(function()
-			Library:hideTooltip(tooltipConnection)
+			Library:hideTooltip()
 		end)
 	end
 
@@ -1545,7 +1595,7 @@ function Library:createDropdown(options: table, parent, scrollingFrame)
 	Dropdown:handleDropdown()
 
 	Theme:registerToObjects({
-		{ object = ImageButton, property = "ImageColor3", theme = { "SecondaryTextColor" } },
+		{ object = ImageButton, property = "ImageColor3", theme = { "PrimaryColor" } },
 		{ object = TextLabel, property = "TextColor3", theme = { "SecondaryTextColor" } },
 		{ object = Box, property = "BackgroundColor3", theme = { "SecondaryBackgroundColor" } },
 		{ object = TextButton, property = "TextColor3", theme = { "SecondaryTextColor" } },
@@ -1605,17 +1655,15 @@ function Library:createKeybind(options: table, parent, scrollingFrame)
 	local Keybind = Assets.Elements.Keybind:Clone()
 	Keybind.Visible = true
 	Keybind.Parent = parent or self.Section
-
 	local TextLabel = Keybind.TextLabel
 	TextLabel.Text = options.text
 
-	local tooltipConnection
 	if options.tooltip and options.tooltip ~= "" then
 		TextLabel.MouseEnter:Connect(function()
-			tooltipConnection = Library:showTooltip(TextLabel, options.tooltip)
+			Library:showTooltip(TextLabel, options.tooltip)
 		end)
 		TextLabel.MouseLeave:Connect(function()
-			Library:hideTooltip(tooltipConnection)
+			Library:hideTooltip()
 		end)
 	end
 
@@ -1650,7 +1698,7 @@ function Library:createKeybind(options: table, parent, scrollingFrame)
 
 	Theme:registerToObjects({
 		{ object = TextLabel, property = "TextColor3", theme = { "SecondaryTextColor" } },
-		{ object = ImageButton, property = "ImageColor3", theme = { "SecondaryTextColor" } },
+		{ object = ImageButton, property = "ImageColor3", theme = { "PrimaryColor" } },
 		{ object = Background, property = "BackgroundColor3", theme = { "SecondaryBackgroundColor" } },
 		{ object = TextButton, property = "TextColor3", theme = { "SecondaryTextColor" } },
 	})
@@ -1688,37 +1736,35 @@ function Library:createButton(options: table, parent, scrollingFrame)
 	local Button = Assets.Elements.Button:Clone()
 	Button.Visible = true
 	Button.Parent = parent or self.Section
-
 	local Background = Button.Background
 
 	local TextButton = Background.TextButton
 	TextButton.Text = options.text
 
-	local tooltipConnection
 	if options.tooltip and options.tooltip ~= "" then
 		TextButton.MouseEnter:Connect(function()
-			tooltipConnection = Library:showTooltip(TextButton, options.tooltip)
+			Library:showTooltip(TextButton, options.tooltip)
 		end)
 		TextButton.MouseLeave:Connect(function()
-			Library:hideTooltip(tooltipConnection)
+			Library:hideTooltip()
 		end)
 	end
 
 	TextButton.MouseButton1Down:Connect(function()
-		Utility:tween(Background, { BackgroundTransparency = 0 }, 0.15, "Quart", "Out"):Play()
-		Utility:tween(TextButton, { TextColor3 = Theme.PrimaryColor, TextTransparency = 0 }, 0.15, "Quart", "Out"):Play()
+		Utility:tween(Background, { BackgroundTransparency = 0, Size = UDim2.new(1, 0, 1, -2) }, 0.08, "Quart", "Out"):Play()
+		Utility:tween(TextButton, { TextColor3 = Theme.PrimaryColor, TextTransparency = 0 }, 0.08, "Quart", "Out"):Play()
 
-		task.delay(0.15, function()
-			Utility:tween(TextButton, { TextColor3 = Theme.SecondaryTextColor, TextTransparency = 0 }, 0.15, "Quart", "Out"):Play()
-			Utility:tween(Background, { BackgroundTransparency = 0.3 }, 0.15, "Quart", "Out"):Play()
+		task.delay(0.08, function()
+			Utility:tween(Background, { BackgroundTransparency = 0.3, Size = UDim2.new(1, 0, 1, 0) }, 0.2, "Back", "Out"):Play()
+			Utility:tween(TextButton, { TextColor3 = Theme.SecondaryTextColor, TextTransparency = 0 }, 0.2, "Quart", "Out"):Play()
 		end)
 
 		options.callback()
 	end)
 
 	Background.MouseEnter:Connect(function(input)
-		Utility:tween(Background, { BackgroundTransparency = 0.3 }, 0.15, "Quart", "Out"):Play()
-		Utility:tween(TextButton, { TextColor3 = Theme.PrimaryColor, TextTransparency = 0.3 }, 0.15, "Quart", "Out"):Play()
+		Utility:tween(Background, { BackgroundTransparency = 0.3 }, 0.12, "Quart", "Out"):Play()
+		Utility:tween(TextButton, { TextColor3 = Theme.PrimaryColor, TextTransparency = 0.3 }, 0.12, "Quart", "Out"):Play()
 	end)
 
 	Background.MouseLeave:Connect(function()
@@ -1745,17 +1791,15 @@ function Library:createTextBox(options: table, parent, scrollingFrame)
 	local TextBox = Assets.Elements.TextBox:Clone()
 	TextBox.Visible = true
 	TextBox.Parent = parent or self.Section
-
 	local TextLabel = TextBox.TextLabel
 	TextLabel.Text = options.text
 
-	local tooltipConnection
 	if options.tooltip and options.tooltip ~= "" then
 		TextLabel.MouseEnter:Connect(function()
-			tooltipConnection = Library:showTooltip(TextLabel, options.tooltip)
+			Library:showTooltip(TextLabel, options.tooltip)
 		end)
 		TextLabel.MouseLeave:Connect(function()
-			Library:hideTooltip(tooltipConnection)
+			Library:hideTooltip()
 		end)
 	end
 
@@ -1844,10 +1888,10 @@ function Library:notify(options: table)
 	Notification.BackgroundTransparency = 1
 
 	for _, data in ipairs(NotificationTransparentObjects) do
-		Utility:tween(data.object, { [data.property] = 0 }, 0.25, "Quart", "Out"):Play()
+		Utility:tween(data.object, { [data.property] = 0 }, 0.3, "Quint", "Out"):Play()
 	end
 
-	Utility:tween(Notification, { ["BackgroundTransparency"] = 0 }, 0.25, "Quart", "Out"):Play()
+	Utility:tween(Notification, { ["BackgroundTransparency"] = 0 }, 0.3, "Quint", "Out"):Play()
 
 	local notificationPosition = -24
 	local notificationSize = 0
@@ -1897,8 +1941,8 @@ function Library:notify(options: table)
 		end
 	end)
 
-	Utility:tween(Notification, { Position = UDim2.new(1, -24, 1, notificationPosition) }, 0.2, "Quart", "Out"):Play()
-	task.wait(0.2)
+	Utility:tween(Notification, { Position = UDim2.new(1, -24, 1, notificationPosition) }, 0.35, "Back", "Out"):Play()
+	task.wait(0.35)
 
 	Theme:registerToObjects({
 		{ object = Notification, property = "BackgroundColor3", theme = { "SecondaryBackgroundColor" } },
@@ -1910,11 +1954,35 @@ function Library:notify(options: table)
 end
 
 function Library:ToggleUI(state)
-    if typeof(state) == "boolean" then
-        ScreenGui.Enabled = state
-    else
-        ScreenGui.Enabled = not ScreenGui.Enabled
-    end
+	if Library._toggling then return end
+
+	-- Kill any visible tooltip immediately
+	Library:forceHideTooltip()
+
+	local targetVisible
+	if typeof(state) == "boolean" then
+		targetVisible = state
+	else
+		targetVisible = not ScreenGui.Enabled
+	end
+
+	if targetVisible then
+		ScreenGui.Enabled = true
+		Glow.Size = UDim2.fromOffset(Library.sizeX * 0.93, Library.sizeY * 0.93)
+		Utility:tween(Glow, {
+			Size = UDim2.fromOffset(Library.sizeX, Library.sizeY),
+		}, 0.3, "Back", "Out"):Play()
+	else
+		Library._toggling = true
+		Utility:tween(Glow, {
+			Size = UDim2.fromOffset(Library.sizeX * 0.93, Library.sizeY * 0.93),
+		}, 0.15, "Quart", "In"):Play()
+		task.delay(0.15, function()
+			ScreenGui.Enabled = false
+			Glow.Size = UDim2.fromOffset(Library.sizeX, Library.sizeY)
+			Library._toggling = false
+		end)
+	end
 end
 
 function Library:createManager(options: table)
@@ -2216,8 +2284,25 @@ function Library:createManager(options: table)
 		})
 	end
 
-	-- Only show Rainbow Icon toggle if user is not poor
+	-- Only show icon toggles if user is not poor
 	if not UserIsPoor then
+		UI:createToggle({
+			text = "Show Icon",
+			state = true,
+			callback = function(state)
+				Library.IconVisible = state
+				local TitleIcon = Title:FindFirstChild("TitleIcon")
+				if TitleIcon then
+					TitleIcon.Visible = state
+					if state then
+						Title.Text = "       " .. (Library.Title or "Leny")
+					else
+						Title.Text = Library.Title or "Leny"
+					end
+				end
+			end,
+		})
+
 		UI:createToggle({
 			text = "Rainbow Icon",
 			state = false,
@@ -2318,7 +2403,7 @@ function Library:createManager(options: table)
 		text = "Hide UI",
 		default = "Insert",
 		callback = function()
-			ScreenGui.Enabled = not ScreenGui.Enabled
+			Library:ToggleUI()
 		end,
 	})
 
