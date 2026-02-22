@@ -10,6 +10,16 @@ function TextBox:handleTextBox()
 	self.autoSizeTextBox()
 	
 	self.TextBox:GetPropertyChangedSignal("Text"):Connect(function()
+		task.defer(function()
+			self.autoSizeTextBox()
+		end)
+	end)
+
+	self.TextBox:GetPropertyChangedSignal("TextBounds"):Connect(function()
+		self.autoSizeTextBox()
+	end)
+
+	self.TextBox.Focused:Connect(function()
 		self.autoSizeTextBox()
 	end)
 	
@@ -17,6 +27,7 @@ function TextBox:handleTextBox()
 		if enterPressed then
 			self.callback(self.TextBox.Text)
 		end
+		self.autoSizeTextBox()
 	end)
 end
 
