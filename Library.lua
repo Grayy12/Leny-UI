@@ -1,6 +1,6 @@
 --!nocheck
 -- update!
-local TESTING = false
+local TESTING = true
 
 local RunService = game:GetService("RunService")
 local TextService = game:GetService("TextService")
