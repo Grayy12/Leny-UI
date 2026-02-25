@@ -542,7 +542,7 @@ function Library:createAddons(text, imageButton, scrollingFrame, additionalAddon
 		end,
 
 		createDropdown = function(self, options)
-			options.default = options.default or {}
+			options.default = {}
 			Library:createDropdown(options, Addon.Inner, scrollingFrame)
 		end,
 
