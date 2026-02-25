@@ -46,6 +46,10 @@ local Library = {
 	Theme = {},
 	DropdownSizes = {},
 	TooltipInstance = nil,
+	TooltipShowId = 0,
+	TooltipMoveConnection = nil,
+	TooltipTweens = {},
+	IconVisible = true,
 }
 Library.__index = Library
 
@@ -193,17 +197,40 @@ function Library:createTooltip()
 	return Tooltip
 end
 
+function Library:cancelTooltipTweens()
+	for _, tween in ipairs(Library.TooltipTweens) do
+		tween:Cancel()
+	end
+	Library.TooltipTweens = {}
+end
+
 function Library:showTooltip(element, text)
-	if not text or text == "" then return end
+	if not text or text == "" then
+		return
+	end
 
 	local Tooltip = Library:createTooltip()
 	local TextLabel = Tooltip.Text
 
+	-- Bump ID so any pending hide callback gets cancelled
+	Library.TooltipShowId = Library.TooltipShowId + 1
+
+	-- Kill any running fade-out tweens immediately
+	Library:cancelTooltipTweens()
+
+	-- Disconnect old move connection if any
+	if Library.TooltipMoveConnection then
+		Library.TooltipMoveConnection:Disconnect()
+		Library.TooltipMoveConnection = nil
+	end
+
 	TextLabel.Text = text
 	local textSize = TextService:GetTextSize(text, 13, Enum.Font.Gotham, Vector2.new(300, 1000))
 	Tooltip.Size = UDim2.fromOffset(textSize.X + 16, textSize.Y + 12)
-	Tooltip.BackgroundTransparency = 1
-	TextLabel.TextTransparency = 1
+
+	-- Snap fully visible instantly
+	Tooltip.BackgroundTransparency = 0
+	TextLabel.TextTransparency = 0
 
 	local function updatePosition()
 		local mousePos = UserInputService:GetMouseLocation()
@@ -215,34 +242,61 @@ function Library:showTooltip(element, text)
 	updatePosition()
 	Tooltip.Visible = true
 
-	Utility:tween(Tooltip, { BackgroundTransparency = 0 }, 0.15, "Quart", "Out"):Play()
-	Utility:tween(TextLabel, { TextTransparency = 0 }, 0.15, "Quart", "Out"):Play()
-
-	local moveConnection
-	moveConnection = UserInputService.InputChanged:Connect(function(input)
+	local moveConnection = UserInputService.InputChanged:Connect(function(input)
 		if input.UserInputType == Enum.UserInputType.MouseMovement then
 			updatePosition()
 		end
 	end)
 
+	Library.TooltipMoveConnection = moveConnection
 	table.insert(Connections, moveConnection)
-	return moveConnection
 end
 
-function Library:hideTooltip(connection)
-	if not Library.TooltipInstance then return end
+function Library:hideTooltip()
+	if not Library.TooltipInstance then
+		return
+	end
 
 	local Tooltip = Library.TooltipInstance
 	local TextLabel = Tooltip.Text
+	local hideId = Library.TooltipShowId
 
-	Utility:tween(Tooltip, { BackgroundTransparency = 1 }, 0.1, "Quart", "Out"):Play()
-	Utility:tween(TextLabel, { TextTransparency = 1 }, 0.1, "Quart", "Out"):Play()
+	-- Cancel any previous tweens before starting new fade-out
+	Library:cancelTooltipTweens()
 
-	task.wait(0.1)
-	Tooltip.Visible = false
+	local t1 = Utility:tween(Tooltip, { BackgroundTransparency = 1 }, 0.1, "Quart", "Out")
+	local t2 = Utility:tween(TextLabel, { TextTransparency = 1 }, 0.1, "Quart", "Out")
+	t1:Play()
+	t2:Play()
+	Library.TooltipTweens = { t1, t2 }
 
-	if connection then
-		connection:Disconnect()
+	task.delay(0.1, function()
+		if Library.TooltipShowId == hideId then
+			Tooltip.Visible = false
+
+			if Library.TooltipMoveConnection then
+				Library.TooltipMoveConnection:Disconnect()
+				Library.TooltipMoveConnection = nil
+			end
+		end
+	end)
+end
+
+function Library:forceHideTooltip()
+	if not Library.TooltipInstance then
+		return
+	end
+
+	Library.TooltipShowId = Library.TooltipShowId + 1
+	Library:cancelTooltipTweens()
+
+	Library.TooltipInstance.BackgroundTransparency = 1
+	Library.TooltipInstance.Text.TextTransparency = 1
+	Library.TooltipInstance.Visible = false
+
+	if Library.TooltipMoveConnection then
+		Library.TooltipMoveConnection:Disconnect()
+		Library.TooltipMoveConnection = nil
 	end
 end
 
@@ -350,59 +404,66 @@ function Library.new(options)
 	Library.Theme.PrimaryColor = options.PrimaryColor
 	Library.Theme.ScrollingBarImageColor = options.ScrollingBarImageColor
 	Library.Theme.Line = options.Line
+	Library.Title = options.title
 
 	ScreenGui.Enabled = true
-	
+
+	-- Intro animation: scale up with bounce
+	Glow.Size = UDim2.fromOffset(options.sizeX * 0.93, options.sizeY * 0.93)
+	Utility:tween(Glow, {
+		Size = UDim2.fromOffset(options.sizeX, options.sizeY),
+	}, 0.4, "Back", "Out"):Play()
+
 	local rainbowConnection = nil
-	
+
 	local function createNaturalRainbowEffect(titleIcon)
 		if rainbowConnection then
 			rainbowConnection:Disconnect()
 			rainbowConnection = nil
 		end
-		
+
 		local originalColor = Library.Theme.PrimaryTextColor
 		local s, v = originalColor:ToHSV()
-		
+
 		local originalSaturation = math.max(s, 0.8)
 		local originalValue = math.max(v, 0.9)
-		
+
 		local startTime = tick()
 		local cycleDuration = 4
-		
+
 		rainbowConnection = game:GetService("RunService").Heartbeat:Connect(function()
 			local elapsed = tick() - startTime
 			local progress = (elapsed % cycleDuration) / cycleDuration
-			
+
 			local currentHue = progress
-			
+
 			local newColor = Color3.fromHSV(currentHue, originalSaturation, originalValue)
 			titleIcon.ImageColor3 = newColor
 		end)
-		
+
 		table.insert(Connections, {
 			Disconnect = function()
 				if rainbowConnection then
 					rainbowConnection:Disconnect()
 					rainbowConnection = nil
 				end
-			end
+			end,
 		})
 	end
-	
+
 	local function stopRainbowEffect(titleIcon)
 		if rainbowConnection then
 			rainbowConnection:Disconnect()
 			rainbowConnection = nil
 		end
-		
+
 		titleIcon.ImageColor3 = Library.Theme.PrimaryTextColor
-		
+
 		Theme:registerToObjects({
 			{ object = titleIcon, property = "ImageColor3", theme = { "PrimaryTextColor" } },
 		})
 	end
-	
+
 	if UserIsPoor then
 		Title.Text = options.title
 		if Title:FindFirstChild("TitleIcon") then
@@ -436,10 +497,8 @@ function Library.new(options)
 		end
 	end
 
-	
 	Glow.Size = UDim2.fromOffset(options.sizeX, options.sizeY)
 end
-
 
 function Library:createAddons(text, imageButton, scrollingFrame, additionalAddons)
 	local Addon = Assets.Elements.Addons:Clone()
@@ -483,7 +542,7 @@ function Library:createAddons(text, imageButton, scrollingFrame, additionalAddon
 		end,
 
 		createDropdown = function(self, options)
-			options.default = {}
+			options.default = options.default or {}
 			Library:createDropdown(options, Addon.Inner, scrollingFrame)
 		end,
 
@@ -626,11 +685,19 @@ function Library:createTab(options: table)
 		textTransparency: number,
 		imageTransparency: number
 	)
-		Utility
-			:tween(tab, { BackgroundColor3 = backgroundColor3, BackgroundTransparency = backgroundTransparency }, 0.3, "Quart", "Out")
+		Utility:tween(
+			tab,
+			{ BackgroundColor3 = backgroundColor3, BackgroundTransparency = backgroundTransparency },
+			0.25,
+			"Back",
+			"Out"
+		):Play()
+		Utility:tween(textButton, { TextColor3 = color, TextTransparency = textTransparency }, 0.2, "Quart", "Out")
 			:Play()
-		Utility:tween(icon, { ImageTransparency = imageTransparency, ImageColor3 = color }, 0.3, "Quart", "Out"):Play()
-		Utility:tween(textButton, { TextColor3 = color, TextTransparency = textTransparency }, 0.3, "Quart", "Out"):Play()
+		task.delay(0.03, function()
+			Utility:tween(icon, { ImageTransparency = imageTransparency, ImageColor3 = color }, 0.25, "Quart", "Out")
+				:Play()
+		end)
 	end
 
 	local function fadeAnimation()
@@ -640,16 +707,20 @@ function Library:createTab(options: table)
 			textTransparency: number,
 			paddingY: number
 		)
-			Utility:tween(fade, { BackgroundTransparency = backgroundTransparency }, 0.25, "Quart", "Out"):Play()
-			Utility:tween(CurrentTabLabel.UIPadding, { PaddingBottom = UDim.new(0, paddingY) }, 0.25, "Quart", "Out"):Play()
+			Utility:tween(fade, { BackgroundTransparency = backgroundTransparency }, 0.3, "Quint", "Out"):Play()
+			Utility:tween(CurrentTabLabel.UIPadding, { PaddingBottom = UDim.new(0, paddingY) }, 0.3, "Back", "Out")
+				:Play()
 		end
 
 		for _, subPage in ipairs(Page:GetChildren()) do
 			if subPage.Name == "SubPage" and subPage.Visible and subPage:FindFirstChild("ScrollingFrame") then
-				Utility:tween(subPage.ScrollingFrame.UIPadding, { PaddingTop = UDim.new(0, 10) }, 0.2, "Quart", "Out"):Play()
+				Utility:tween(subPage.ScrollingFrame.UIPadding, { PaddingTop = UDim.new(0, 6) }, 0.15, "Quart", "Out")
+					:Play()
 
-				task.delay(0.2, function()
-					Utility:tween(subPage.ScrollingFrame.UIPadding, { PaddingTop = UDim.new(0, 0) }, 0.2, "Quart", "Out"):Play()
+				task.delay(0.15, function()
+					Utility
+						:tween(subPage.ScrollingFrame.UIPadding, { PaddingTop = UDim.new(0, 0) }, 0.25, "Back", "Out")
+						:Play()
 				end)
 			end
 		end
@@ -659,11 +730,11 @@ function Library:createTab(options: table)
 		Fade.Visible = true
 		Fade.Parent = Background.Pages
 
-		tweenFadeAndPage(Fade, 0, 1, 14)
+		tweenFadeAndPage(Fade, 0, 1, 10)
 
-		task.delay(0.25, function()
+		task.delay(0.3, function()
 			tweenFadeAndPage(Fade, 1, 0, 0)
-			task.wait(0.25)
+			task.wait(0.3)
 			Fade:Destroy()
 		end)
 	end
@@ -801,14 +872,15 @@ function Library:createSubTab(options: table)
 		textTransparency: number,
 		disableUnderlineTween: boolean
 	)
-		Utility:tween(subTab, { TextColor3 = textColor, TextTransparency = textTransparency }, 0.25, "Quart", "Out"):Play()
+		Utility:tween(subTab, { TextColor3 = textColor, TextTransparency = textTransparency }, 0.2, "Quart", "Out")
+			:Play()
 
 		if not disableUnderlineTween then
 			Utility:tween(underline, {
 				BackgroundColor3 = Theme.PrimaryColor,
 				Position = UDim2.new(0, subTabPosition, 1, 0),
 				Size = UDim2.new(0, subTab.Size.X.Offset, 0, 2),
-			}, 0.25, "Quart", "Out"):Play()
+			}, 0.3, "Back", "Out"):Play()
 		end
 	end
 
@@ -949,7 +1021,6 @@ function Library:createToggle(options: table, parent, scrollingFrame)
 	local Toggle = Assets.Elements.Toggle:Clone()
 	Toggle.Visible = true
 	Toggle.Parent = parent or self.Section
-
 	local TextLabel = Toggle.TextLabel
 	TextLabel.Text = options.text
 
@@ -958,13 +1029,12 @@ function Library:createToggle(options: table, parent, scrollingFrame)
 	local Background = TextButton.Background
 	local Circle = Background.Circle
 
-	local tooltipConnection
 	if options.tooltip and options.tooltip ~= "" then
 		TextLabel.MouseEnter:Connect(function()
-			tooltipConnection = Library:showTooltip(TextLabel, options.tooltip)
+			Library:showTooltip(TextLabel, options.tooltip)
 		end)
 		TextLabel.MouseLeave:Connect(function()
-			Library:hideTooltip(tooltipConnection)
+			Library:hideTooltip()
 		end)
 	end
 
@@ -975,8 +1045,13 @@ function Library:createToggle(options: table, parent, scrollingFrame)
 		position: UDim2
 	)
 		Utility:tween(Background, { BackgroundColor3 = backgroundColor }, 0.25, "Quart", "Out"):Play()
-		Utility:tween(Circle, { BackgroundColor3 = circleColor, AnchorPoint = anchorPoint, Position = position }, 0.25, "Quart", "Out")
-			:Play()
+		Utility:tween(
+			Circle,
+			{ BackgroundColor3 = circleColor, AnchorPoint = anchorPoint, Position = position },
+			0.3,
+			"Back",
+			"Out"
+		):Play()
 	end
 
 	local circleOn = false
@@ -1025,7 +1100,7 @@ function Library:createToggle(options: table, parent, scrollingFrame)
 			theme = { "TertiaryBackgroundColor", "PrimaryBackgroundColor" },
 			circleOn = circleOn,
 		},
-		{ object = ImageButton, property = "ImageColor3", theme = { "SecondaryTextColor" } },
+		{ object = ImageButton, property = "ImageColor3", theme = { "PrimaryColor" } },
 	})
 
 	shared.Flags.Toggle[options.text] = {
@@ -1066,7 +1141,6 @@ function Library:createSlider(options: table, parent, scrollingFrame)
 	local Slider = Assets.Elements.Slider:Clone()
 	Slider.Visible = true
 	Slider.Parent = parent or self.Section
-
 	local TextLabel = Slider.TextButton.TextLabel
 	local ImageButton = TextLabel.ImageButton
 	local TextBox = TextLabel.TextBox
@@ -1078,13 +1152,12 @@ function Library:createSlider(options: table, parent, scrollingFrame)
 	local TextLabel = TextButton.TextLabel
 	TextLabel.Text = options.text
 
-	local tooltipConnection
 	if options.tooltip and options.tooltip ~= "" then
 		TextLabel.MouseEnter:Connect(function()
-			tooltipConnection = Library:showTooltip(TextLabel, options.tooltip)
+			Library:showTooltip(TextLabel, options.tooltip)
 		end)
 		TextLabel.MouseLeave:Connect(function()
-			Library:hideTooltip(tooltipConnection)
+			Library:hideTooltip()
 		end)
 	end
 
@@ -1094,11 +1167,12 @@ function Library:createSlider(options: table, parent, scrollingFrame)
 
 	local function tweenSliderInfoAssets(transparency: number)
 		local TextBoundsX = math.clamp(CurrentValueLabel.TextBounds.X + 14, 10, 200)
+		local easing = transparency == 0 and "Back" or "Quart"
 		Utility:tween(CurrentValueLabel, {
 			Size = UDim2.fromOffset(TextBoundsX, 20),
 			BackgroundTransparency = transparency,
 			TextTransparency = transparency,
-		}, 0.2, "Quart", "Out"):Play()
+		}, 0.2, easing, "Out"):Play()
 	end
 
 	local Context = Utility:validateContext({
@@ -1116,7 +1190,8 @@ function Library:createSlider(options: table, parent, scrollingFrame)
 		autoSizeTextBox = {
 			Value = function()
 				local TextBoundsX = math.clamp(TextLabel.TextBox.TextBounds.X + 14, 10, 200)
-				Utility:tween(TextLabel.TextBox, { Size = UDim2.fromOffset(TextBoundsX, 20) }, 0.2, "Quart", "Out"):Play()
+				Utility:tween(TextLabel.TextBox, { Size = UDim2.fromOffset(TextBoundsX, 20) }, 0.2, "Quart", "Out")
+					:Play()
 			end,
 			ExpectedType = "function",
 		},
@@ -1151,7 +1226,7 @@ function Library:createSlider(options: table, parent, scrollingFrame)
 		{ object = Line, property = "BackgroundColor3", theme = { "SecondaryBackgroundColor" } },
 		{ object = Fill, property = "BackgroundColor3", theme = { "PrimaryColor" } },
 		{ object = Circle, property = "BackgroundColor3", theme = { "PrimaryColor" } },
-		{ object = ImageButton, property = "ImageColor3", theme = { "SecondaryTextColor" } },
+		{ object = ImageButton, property = "ImageColor3", theme = { "PrimaryColor" } },
 		{ object = TextBox, property = "BackgroundColor3", theme = { "SecondaryBackgroundColor" } },
 		{ object = TextBox, property = "TextColor3", theme = { "SecondaryTextColor" } },
 		{ object = CurrentValueLabel, property = "TextColor3", theme = { "TertiaryBackgroundColor" } },
@@ -1201,17 +1276,15 @@ function Library:createPicker(options: table, parent, scrollingFrame, isPickerBo
 	local Picker = Assets.Elements.Picker:Clone()
 	Picker.Visible = true
 	Picker.Parent = parent or self.Section
-
 	local TextLabel = Picker.TextLabel
 	TextLabel.Text = options.text
 
-	local tooltipConnection
 	if options.tooltip and options.tooltip ~= "" then
 		TextLabel.MouseEnter:Connect(function()
-			tooltipConnection = Library:showTooltip(TextLabel, options.tooltip)
+			Library:showTooltip(TextLabel, options.tooltip)
 		end)
 		TextLabel.MouseLeave:Connect(function()
-			Library:hideTooltip(tooltipConnection)
+			Library:hideTooltip()
 		end)
 	end
 
@@ -1252,55 +1325,77 @@ function Library:createPicker(options: table, parent, scrollingFrame, isPickerBo
 	TextButton.MouseButton1Down:Connect(Popup:togglePopup())
 	Popup:hidePopupOnClickingOutside()
 
-	local ColorPickerContext = Utility:validateContext({
-		ColorPicker = { Value = ColorPicker, ExpectedType = "Instance" },
-		Hex = { Value = Hex, ExpectedType = "Instance" },
-		RGB = { Value = RGB, ExpectedType = "Instance" },
-		Slider = { Value = Slider, ExpectedType = "Instance" },
-		HSV = { Value = HSV, ExpectedType = "Instance" },
-		Submit = { Value = Submit, ExpectedType = "Instance" },
-		Background = { Value = Background, ExpectedType = "Instance" },
-		Connections = { Value = Connections, ExpectedType = "table" },
-		color = { Value = options.color, ExpectedType = "Color3" },
-		callback = { Value = options.callback, ExpectedType = "function" },
+	local ColorPickerContext =
+		Utility:validateContext({
+			ColorPicker = { Value = ColorPicker, ExpectedType = "Instance" },
+			Hex = { Value = Hex, ExpectedType = "Instance" },
+			RGB = { Value = RGB, ExpectedType = "Instance" },
+			Slider = { Value = Slider, ExpectedType = "Instance" },
+			HSV = { Value = HSV, ExpectedType = "Instance" },
+			Submit = { Value = Submit, ExpectedType = "Instance" },
+			Background = { Value = Background, ExpectedType = "Instance" },
+			Connections = { Value = Connections, ExpectedType = "table" },
+			color = { Value = options.color, ExpectedType = "Color3" },
+			callback = { Value = options.callback, ExpectedType = "function" },
 
-		submitAnimation = {
-			Value = function()
-				Utility:tween(Submit.TextLabel, { BackgroundTransparency = 0 }, 0.2, "Quart", "Out"):Play()
-				Utility:tween(Submit.TextLabel, { TextColor3 = Theme.PrimaryColor, TextTransparency = 0 }, 0.2, "Quart", "Out"):Play()
+			submitAnimation = {
+				Value = function()
+					Utility:tween(Submit.TextLabel, { BackgroundTransparency = 0 }, 0.2, "Quart", "Out"):Play()
+					Utility:tween(
+						Submit.TextLabel,
+						{ TextColor3 = Theme.PrimaryColor, TextTransparency = 0 },
+						0.2,
+						"Quart",
+						"Out"
+					):Play()
 
-				task.delay(0.2, function()
-					Utility
-						:tween(Submit.TextLabel, { TextColor3 = Theme.SecondaryTextColor, TextTransparency = 0 }, 0.2, "Quart", "Out")
-						:Play()
+					task.delay(0.2, function()
+						Utility:tween(
+							Submit.TextLabel,
+							{ TextColor3 = Theme.SecondaryTextColor, TextTransparency = 0 },
+							0.2,
+							"Quart",
+							"Out"
+						):Play()
+						Utility:tween(Submit.TextLabel, { BackgroundTransparency = 0.3 }, 0.2, "Quart", "Out"):Play()
+					end)
+				end,
+				ExpectedType = "function",
+			},
+
+			hoveringOn = {
+				Value = function()
 					Utility:tween(Submit.TextLabel, { BackgroundTransparency = 0.3 }, 0.2, "Quart", "Out"):Play()
-				end)
-			end,
-			ExpectedType = "function",
-		},
+					Utility:tween(
+						Submit.TextLabel,
+						{ TextColor3 = Theme.PrimaryColor, TextTransparency = 0.3 },
+						0.2,
+						"Quart",
+						"Out"
+					):Play()
+				end,
+				ExpectedType = "function",
+			},
 
-		hoveringOn = {
-			Value = function()
-				Utility:tween(Submit.TextLabel, { BackgroundTransparency = 0.3 }, 0.2, "Quart", "Out"):Play()
-				Utility:tween(Submit.TextLabel, { TextColor3 = Theme.PrimaryColor, TextTransparency = 0.3 }, 0.2, "Quart", "Out"):Play()
-			end,
-			ExpectedType = "function",
-		},
-
-		hoveringOff = {
-			Value = function()
-				Utility:tween(Submit.TextLabel, { BackgroundTransparency = 0 }, 0.2, "Quart", "Out"):Play()
-				Utility:tween(Submit.TextLabel, { TextColor3 = Theme.SecondaryTextColor, TextTransparency = 0 }, 0.2, "Quart", "Out")
-					:Play()
-			end,
-			ExpectedType = "function",
-		},
-	})
+			hoveringOff = {
+				Value = function()
+					Utility:tween(Submit.TextLabel, { BackgroundTransparency = 0 }, 0.2, "Quart", "Out"):Play()
+					Utility:tween(
+						Submit.TextLabel,
+						{ TextColor3 = Theme.SecondaryTextColor, TextTransparency = 0 },
+						0.2,
+						"Quart",
+						"Out"
+					):Play()
+				end,
+				ExpectedType = "function",
+			},
+		})
 
 	Theme:registerToObjects({
 		{ object = TextLabel, property = "TextColor3", theme = { "SecondaryTextColor" } },
 		{ object = ColorPicker, property = "BackgroundColor3", theme = { "Line" } },
-		{ object = ImageButton, property = "ImageColor3", theme = { "SecondaryTextColor" } },
+		{ object = ImageButton, property = "ImageColor3", theme = { "PrimaryColor" } },
 		{ object = Inner, property = "BackgroundColor3", theme = { "PrimaryBackgroundColor" } },
 		{ object = Submit, property = "BackgroundColor3", theme = { "SecondaryBackgroundColor" } },
 		{ object = Hex, property = "BackgroundColor3", theme = { "SecondaryBackgroundColor" } },
@@ -1347,17 +1442,15 @@ function Library:createDropdown(options: table, parent, scrollingFrame)
 	local Dropdown = Assets.Elements.Dropdown:Clone()
 	Dropdown.Visible = true
 	Dropdown.Parent = parent or self.Section
-
 	local TextLabel = Dropdown.TextLabel
 	TextLabel.Text = options.text
 
-	local tooltipConnection
 	if options.tooltip and options.tooltip ~= "" then
 		TextLabel.MouseEnter:Connect(function()
-			tooltipConnection = Library:showTooltip(TextLabel, options.tooltip)
+			Library:showTooltip(TextLabel, options.tooltip)
 		end)
 		TextLabel.MouseLeave:Connect(function()
-			Library:hideTooltip(tooltipConnection)
+			Library:hideTooltip()
 		end)
 	end
 
@@ -1545,7 +1638,7 @@ function Library:createDropdown(options: table, parent, scrollingFrame)
 	Dropdown:handleDropdown()
 
 	Theme:registerToObjects({
-		{ object = ImageButton, property = "ImageColor3", theme = { "SecondaryTextColor" } },
+		{ object = ImageButton, property = "ImageColor3", theme = { "PrimaryColor" } },
 		{ object = TextLabel, property = "TextColor3", theme = { "SecondaryTextColor" } },
 		{ object = Box, property = "BackgroundColor3", theme = { "SecondaryBackgroundColor" } },
 		{ object = TextButton, property = "TextColor3", theme = { "SecondaryTextColor" } },
@@ -1605,17 +1698,15 @@ function Library:createKeybind(options: table, parent, scrollingFrame)
 	local Keybind = Assets.Elements.Keybind:Clone()
 	Keybind.Visible = true
 	Keybind.Parent = parent or self.Section
-
 	local TextLabel = Keybind.TextLabel
 	TextLabel.Text = options.text
 
-	local tooltipConnection
 	if options.tooltip and options.tooltip ~= "" then
 		TextLabel.MouseEnter:Connect(function()
-			tooltipConnection = Library:showTooltip(TextLabel, options.tooltip)
+			Library:showTooltip(TextLabel, options.tooltip)
 		end)
 		TextLabel.MouseLeave:Connect(function()
-			Library:hideTooltip(tooltipConnection)
+			Library:hideTooltip()
 		end)
 	end
 
@@ -1639,7 +1730,8 @@ function Library:createKeybind(options: table, parent, scrollingFrame)
 		autoSizeBackground = {
 			Value = function()
 				local TextBoundsX = math.clamp(TextButton.TextBounds.X + 14, 10, 200)
-				Utility:tween(TextButton.Parent, { Size = UDim2.fromOffset(TextBoundsX, 20) }, 0.2, "Quart", "Out"):Play()
+				Utility:tween(TextButton.Parent, { Size = UDim2.fromOffset(TextBoundsX, 20) }, 0.2, "Quart", "Out")
+					:Play()
 			end,
 			ExpectedType = "function",
 		},
@@ -1650,7 +1742,7 @@ function Library:createKeybind(options: table, parent, scrollingFrame)
 
 	Theme:registerToObjects({
 		{ object = TextLabel, property = "TextColor3", theme = { "SecondaryTextColor" } },
-		{ object = ImageButton, property = "ImageColor3", theme = { "SecondaryTextColor" } },
+		{ object = ImageButton, property = "ImageColor3", theme = { "PrimaryColor" } },
 		{ object = Background, property = "BackgroundColor3", theme = { "SecondaryBackgroundColor" } },
 		{ object = TextButton, property = "TextColor3", theme = { "SecondaryTextColor" } },
 	})
@@ -1688,42 +1780,48 @@ function Library:createButton(options: table, parent, scrollingFrame)
 	local Button = Assets.Elements.Button:Clone()
 	Button.Visible = true
 	Button.Parent = parent or self.Section
-
 	local Background = Button.Background
 
 	local TextButton = Background.TextButton
 	TextButton.Text = options.text
 
-	local tooltipConnection
 	if options.tooltip and options.tooltip ~= "" then
 		TextButton.MouseEnter:Connect(function()
-			tooltipConnection = Library:showTooltip(TextButton, options.tooltip)
+			Library:showTooltip(TextButton, options.tooltip)
 		end)
 		TextButton.MouseLeave:Connect(function()
-			Library:hideTooltip(tooltipConnection)
+			Library:hideTooltip()
 		end)
 	end
 
 	TextButton.MouseButton1Down:Connect(function()
-		Utility:tween(Background, { BackgroundTransparency = 0 }, 0.15, "Quart", "Out"):Play()
-		Utility:tween(TextButton, { TextColor3 = Theme.PrimaryColor, TextTransparency = 0 }, 0.15, "Quart", "Out"):Play()
+		Utility:tween(Background, { BackgroundTransparency = 0, Size = UDim2.new(1, 0, 1, -2) }, 0.08, "Quart", "Out")
+			:Play()
+		Utility:tween(TextButton, { TextColor3 = Theme.PrimaryColor, TextTransparency = 0 }, 0.08, "Quart", "Out")
+			:Play()
 
-		task.delay(0.15, function()
-			Utility:tween(TextButton, { TextColor3 = Theme.SecondaryTextColor, TextTransparency = 0 }, 0.15, "Quart", "Out"):Play()
-			Utility:tween(Background, { BackgroundTransparency = 0.3 }, 0.15, "Quart", "Out"):Play()
+		task.delay(0.08, function()
+			Utility
+				:tween(Background, { BackgroundTransparency = 0.3, Size = UDim2.new(1, 0, 1, 0) }, 0.2, "Back", "Out")
+				:Play()
+			Utility
+				:tween(TextButton, { TextColor3 = Theme.SecondaryTextColor, TextTransparency = 0 }, 0.2, "Quart", "Out")
+				:Play()
 		end)
 
 		options.callback()
 	end)
 
 	Background.MouseEnter:Connect(function(input)
-		Utility:tween(Background, { BackgroundTransparency = 0.3 }, 0.15, "Quart", "Out"):Play()
-		Utility:tween(TextButton, { TextColor3 = Theme.PrimaryColor, TextTransparency = 0.3 }, 0.15, "Quart", "Out"):Play()
+		Utility:tween(Background, { BackgroundTransparency = 0.3 }, 0.12, "Quart", "Out"):Play()
+		Utility:tween(TextButton, { TextColor3 = Theme.PrimaryColor, TextTransparency = 0.3 }, 0.12, "Quart", "Out")
+			:Play()
 	end)
 
 	Background.MouseLeave:Connect(function()
 		Utility:tween(Background, { BackgroundTransparency = 0 }, 0.15, "Quart", "Out"):Play()
-		Utility:tween(TextButton, { TextColor3 = Theme.SecondaryTextColor, TextTransparency = 0 }, 0.15, "Quart", "Out"):Play()
+		Utility:tween(TextButton, { TextColor3 = Theme.SecondaryTextColor, TextTransparency = 0 }, 0.15, "Quart", "Out")
+			:Play()
 	end)
 
 	Theme:registerToObjects({
@@ -1745,17 +1843,15 @@ function Library:createTextBox(options: table, parent, scrollingFrame)
 	local TextBox = Assets.Elements.TextBox:Clone()
 	TextBox.Visible = true
 	TextBox.Parent = parent or self.Section
-
 	local TextLabel = TextBox.TextLabel
 	TextLabel.Text = options.text
 
-	local tooltipConnection
 	if options.tooltip and options.tooltip ~= "" then
 		TextLabel.MouseEnter:Connect(function()
-			tooltipConnection = Library:showTooltip(TextLabel, options.tooltip)
+			Library:showTooltip(TextLabel, options.tooltip)
 		end)
 		TextLabel.MouseLeave:Connect(function()
-			Library:hideTooltip(tooltipConnection)
+			Library:hideTooltip()
 		end)
 	end
 
@@ -1844,10 +1940,10 @@ function Library:notify(options: table)
 	Notification.BackgroundTransparency = 1
 
 	for _, data in ipairs(NotificationTransparentObjects) do
-		Utility:tween(data.object, { [data.property] = 0 }, 0.25, "Quart", "Out"):Play()
+		Utility:tween(data.object, { [data.property] = 0 }, 0.3, "Quint", "Out"):Play()
 	end
 
-	Utility:tween(Notification, { ["BackgroundTransparency"] = 0 }, 0.25, "Quart", "Out"):Play()
+	Utility:tween(Notification, { ["BackgroundTransparency"] = 0 }, 0.3, "Quint", "Out"):Play()
 
 	local notificationPosition = -24
 	local notificationSize = 0
@@ -1856,7 +1952,8 @@ function Library:notify(options: table)
 	for index, notification in ipairs(ScreenGui.Notifications:GetChildren()) do
 		if index == 1 then
 			notificationSize = notification.AbsoluteSize.Y
-			Utility:tween(notification, { Position = UDim2.new(1, -24, 1, notificationPosition) }, 0.2, "Quart", "Out"):Play()
+			Utility:tween(notification, { Position = UDim2.new(1, -24, 1, notificationPosition) }, 0.2, "Quart", "Out")
+				:Play()
 			continue
 		end
 
@@ -1871,13 +1968,23 @@ function Library:notify(options: table)
 				if index == 1 then
 					notificationPosition = -14
 					notificationSize = notification.AbsoluteSize.Y
-					Utility:tween(notification, { Position = UDim2.new(1, -24, 1, notificationPosition) }, 0.2, "Quart", "Out"):Play()
+					Utility
+						:tween(
+							notification,
+							{ Position = UDim2.new(1, -24, 1, notificationPosition) },
+							0.2,
+							"Quart",
+							"Out"
+						)
+						:Play()
 					continue
 				end
 
 				notificationPosition -= notificationSize + PADDING_Y
 				notificationSize = notification.AbsoluteSize.Y
-				Utility:tween(notification, { Position = UDim2.new(1, -24, 1, notificationPosition) }, 0.2, "Quart", "Out"):Play()
+				Utility
+					:tween(notification, { Position = UDim2.new(1, -24, 1, notificationPosition) }, 0.2, "Quart", "Out")
+					:Play()
 			end
 		end)
 
@@ -1897,8 +2004,8 @@ function Library:notify(options: table)
 		end
 	end)
 
-	Utility:tween(Notification, { Position = UDim2.new(1, -24, 1, notificationPosition) }, 0.2, "Quart", "Out"):Play()
-	task.wait(0.2)
+	Utility:tween(Notification, { Position = UDim2.new(1, -24, 1, notificationPosition) }, 0.35, "Back", "Out"):Play()
+	task.wait(0.35)
 
 	Theme:registerToObjects({
 		{ object = Notification, property = "BackgroundColor3", theme = { "SecondaryBackgroundColor" } },
@@ -1910,18 +2017,108 @@ function Library:notify(options: table)
 end
 
 function Library:ToggleUI(state)
-    if typeof(state) == "boolean" then
-        ScreenGui.Enabled = state
-    else
-        ScreenGui.Enabled = not ScreenGui.Enabled
-    end
+	if Library._toggling then
+		return
+	end
+
+	-- Kill any visible tooltip immediately
+	Library:forceHideTooltip()
+
+	local targetVisible
+	if typeof(state) == "boolean" then
+		targetVisible = state
+	else
+		targetVisible = not ScreenGui.Enabled
+	end
+
+	if targetVisible then
+		ScreenGui.Enabled = true
+		Glow.Size = UDim2.fromOffset(Library.sizeX * 0.93, Library.sizeY * 0.93)
+		Utility:tween(Glow, {
+			Size = UDim2.fromOffset(Library.sizeX, Library.sizeY),
+		}, 0.3, "Back", "Out"):Play()
+	else
+		Library._toggling = true
+		Utility:tween(Glow, {
+			Size = UDim2.fromOffset(Library.sizeX * 0.93, Library.sizeY * 0.93),
+		}, 0.15, "Quart", "In"):Play()
+		task.delay(0.15, function()
+			ScreenGui.Enabled = false
+			Glow.Size = UDim2.fromOffset(Library.sizeX, Library.sizeY)
+			Library._toggling = false
+		end)
+	end
 end
 
 function Library:createManager(options: table)
 	Utility:validateOptions(options, {
 		folderName = { Default = "Leny", ExpectedType = "string" },
 		icon = { Default = "124718082122263", ExpectedType = "string" },
+		apiBaseUrl = { Default = "", ExpectedType = "string" },
 	})
+
+	local HttpService = game:GetService("HttpService")
+	local exportCooldownUntil = 0
+
+	local function getRequestFunction()
+		return request or http_request or (syn and syn.request)
+	end
+
+	local function resolveApiUrl(path: string)
+		if options.apiBaseUrl == "" then
+			return path
+		end
+
+		if string.sub(options.apiBaseUrl, -1) == "/" and string.sub(path, 1, 1) == "/" then
+			return string.sub(options.apiBaseUrl, 1, #options.apiBaseUrl - 1) .. path
+		end
+
+		if string.sub(options.apiBaseUrl, -1) ~= "/" and string.sub(path, 1, 1) ~= "/" then
+			return options.apiBaseUrl .. "/" .. path
+		end
+
+		return options.apiBaseUrl .. path
+	end
+
+	local function getHeader(headers: table?, headerName: string)
+		for key, value in pairs(headers or {}) do
+			if string.lower(tostring(key)) == string.lower(headerName) then
+				return value
+			end
+		end
+
+		return nil
+	end
+
+	local function requestApi(method: string, path: string, body: table?)
+		local requestFn = getRequestFunction()
+		if not requestFn then
+			return nil, "No supported request function found (request/http_request/syn.request)."
+		end
+
+		local requestData = {
+			Url = resolveApiUrl(path),
+			Method = method,
+			Headers = {
+				["Content-Type"] = "application/json",
+				["Accept"] = "application/json",
+			},
+		}
+
+		if body then
+			requestData.Body = HttpService:JSONEncode(body)
+		end
+
+		local ok, response = pcall(function()
+			return requestFn(requestData)
+		end)
+
+		if not ok then
+			return nil, tostring(response)
+		end
+
+		return response, nil
+	end
 
 	local function getJsons()
 		local jsons = {}
@@ -1946,24 +2143,24 @@ function Library:createManager(options: table)
 
 		return themeJsons
 	end
-	
+
 	-- Function to fetch theme presets from GitHub
 	local function getThemePresets()
 		local success, result = pcall(function()
 			local response = game:HttpGet("https://api.github.com/repos/DontGho/userinterface/contents")
-			local decoded = game:GetService("HttpService"):JSONDecode(response)
+			local decoded = HttpService:JSONDecode(response)
 			local presets = {}
-			
+
 			for _, file in ipairs(decoded) do
 				if file.type == "file" and string.match(file.name, ".json$") then
 					local name = string.gsub(file.name, ".json", "")
 					table.insert(presets, name)
 				end
 			end
-			
+
 			return presets
 		end)
-		
+
 		if success then
 			return result
 		else
@@ -2065,54 +2262,101 @@ function Library:createManager(options: table)
 		return SavedData
 	end
 
-	local function loadSaveConfig(fileName: string)
-		if not fileName or fileName == "" then
-			return
+	local function applySavedData(decoded: table)
+		if type(decoded) ~= "table" then
+			return false, "Invalid settings payload"
 		end
-		
-		local filePath = options.folderName .. "/" .. fileName .. ".json"
-		if not isfile(filePath) then
-			return
-		end
-		
-		local decoded = game:GetService("HttpService"):JSONDecode(readfile(filePath))
 
 		for elementType, elementData in pairs(shared.Flags) do
 			for elementName, _ in pairs(elementData) do
-				if elementType == "Dropdown" and decoded.Dropdown[elementName] and shared.Flags.Dropdown[elementName] and elementName ~= "Configs" and elementName ~= "Theme Configs" and elementName ~= "Theme Presets" then
-					-- Ensure value is a table
+				if
+					elementType == "Dropdown"
+					and decoded.Dropdown
+					and decoded.Dropdown[elementName]
+					and shared.Flags.Dropdown[elementName]
+					and elementName ~= "Configs"
+					and elementName ~= "Theme Configs"
+					and elementName ~= "Theme Presets"
+				then
 					local defaultValue = decoded.Dropdown[elementName].value
 					if type(defaultValue) ~= "table" then
-						defaultValue = {defaultValue}
+						defaultValue = { defaultValue }
 					end
+
 					shared.Flags.Dropdown[elementName]:updateList({
 						list = decoded.Dropdown[elementName].list,
 						default = defaultValue,
 					})
 				end
 
-				if elementType == "Toggle" and decoded.Toggle[elementName] and shared.Flags.Toggle[elementName] then
+				if
+					elementType == "Toggle"
+					and decoded.Toggle
+					and decoded.Toggle[elementName]
+					and shared.Flags.Toggle[elementName]
+				then
 					shared.Flags.Toggle[elementName]:updateState({ state = decoded.Toggle[elementName].state })
 				end
 
-				if elementType == "Slider" and decoded.Slider[elementName] and shared.Flags.Slider[elementName] then
+				if
+					elementType == "Slider"
+					and decoded.Slider
+					and decoded.Slider[elementName]
+					and shared.Flags.Slider[elementName]
+				then
 					shared.Flags.Slider[elementName]:updateValue({ value = decoded.Slider[elementName].value })
 				end
 
-				if elementType == "Keybind" and decoded.Keybind[elementName] and shared.Flags.Keybind[elementName] then
+				if
+					elementType == "Keybind"
+					and decoded.Keybind
+					and decoded.Keybind[elementName]
+					and shared.Flags.Keybind[elementName]
+				then
 					shared.Flags.Keybind[elementName]:updateKeybind({ bind = decoded.Keybind[elementName].keybind })
 				end
 
-				if elementType == "TextBox" and decoded.TextBox[elementName] and shared.Flags.TextBox[elementName] then
+				if
+					elementType == "TextBox"
+					and decoded.TextBox
+					and decoded.TextBox[elementName]
+					and shared.Flags.TextBox[elementName]
+				then
 					shared.Flags.TextBox[elementName]:updateText({ text = decoded.TextBox[elementName].text })
 				end
 
-				if elementType == "ColorPicker" and decoded.ColorPicker[elementName] and shared.Flags.ColorPicker[elementName] then
+				if
+					elementType == "ColorPicker"
+					and decoded.ColorPicker
+					and decoded.ColorPicker[elementName]
+					and shared.Flags.ColorPicker[elementName]
+				then
 					shared.Flags.ColorPicker[elementName]:updateColor({
 						color = Color3.fromRGB(unpack(decoded.ColorPicker[elementName].color)),
 					})
 				end
 			end
+		end
+
+		return true
+	end
+
+	local function loadSaveConfig(fileName: string)
+		if not fileName or fileName == "" then
+			return
+		end
+
+		local filePath = options.folderName .. "/" .. fileName .. ".json"
+		if not isfile(filePath) then
+			return
+		end
+
+		local decodeSuccess, decoded = pcall(function()
+			return HttpService:JSONDecode(readfile(filePath))
+		end)
+
+		if decodeSuccess then
+			applySavedData(decoded)
 		end
 	end
 
@@ -2120,29 +2364,31 @@ function Library:createManager(options: table)
 		if not fileName or fileName == "" then
 			return
 		end
-		
+
 		local decoded
 		local success, err = pcall(function()
 			if isGitHub then
 				-- URL encode the filename to handle spaces and special characters
-				local encodedFileName = game:GetService("HttpService"):UrlEncode(fileName)
-				local url = "https://raw.githubusercontent.com/DontGho/userinterface/refs/heads/main/" .. encodedFileName .. ".json"
+				local encodedFileName = HttpService:UrlEncode(fileName)
+				local url = "https://raw.githubusercontent.com/DontGho/userinterface/refs/heads/main/"
+					.. encodedFileName
+					.. ".json"
 				local response = game:HttpGet(url)
-				decoded = game:GetService("HttpService"):JSONDecode(response)
+				decoded = HttpService:JSONDecode(response)
 			else
 				local filePath = options.folderName .. "/Theme/" .. fileName .. ".json"
 				if not isfile(filePath) then
 					error("File does not exist: " .. filePath)
 				end
-				decoded = game:GetService("HttpService"):JSONDecode(readfile(filePath))
+				decoded = HttpService:JSONDecode(readfile(filePath))
 			end
 		end)
-		
+
 		if not success then
 			warn("Failed to load theme config:", err)
 			return
 		end
-		
+
 		if not decoded or not decoded.ColorPicker then
 			warn("Invalid theme config format")
 			return
@@ -2150,7 +2396,11 @@ function Library:createManager(options: table)
 
 		for elementType, elementData in pairs(shared.Flags) do
 			for elementName, _ in pairs(elementData) do
-				if elementType == "ColorPicker" and decoded.ColorPicker[elementName] and shared.Flags.ColorPicker[elementName] then
+				if
+					elementType == "ColorPicker"
+					and decoded.ColorPicker[elementName]
+					and shared.Flags.ColorPicker[elementName]
+				then
 					local colorData = decoded.ColorPicker[elementName].color
 					if colorData and #colorData == 3 then
 						shared.Flags.ColorPicker[elementName]:updateColor({
@@ -2173,33 +2423,33 @@ function Library:createManager(options: table)
 			rainbowConnection:Disconnect()
 			rainbowConnection = nil
 		end
-		
+
 		local originalColor = Library.Theme.PrimaryTextColor
 		local h, s, v = originalColor:ToHSV()
-		
+
 		local originalSaturation = math.max(s, 0.8)
 		local originalValue = math.max(v, 0.9)
-		
+
 		local startTime = tick()
 		local cycleDuration = 4
-		
+
 		rainbowConnection = game:GetService("RunService").Heartbeat:Connect(function()
 			local elapsed = tick() - startTime
 			local progress = (elapsed % cycleDuration) / cycleDuration
-			
+
 			local currentHue = progress
-			
+
 			local newColor = Color3.fromHSV(currentHue, originalSaturation, originalValue)
 			titleIcon.ImageColor3 = newColor
 		end)
-		
+
 		table.insert(Connections, {
 			Disconnect = function()
 				if rainbowConnection then
 					rainbowConnection:Disconnect()
 					rainbowConnection = nil
 				end
-			end
+			end,
 		})
 	end
 
@@ -2209,15 +2459,32 @@ function Library:createManager(options: table)
 			rainbowConnection = nil
 		end
 		titleIcon.ImageColor3 = Library.Theme.PrimaryTextColor
-		
+
 		-- Re-register to theme so it updates with theme changes
 		Theme:registerToObjects({
 			{ object = titleIcon, property = "ImageColor3", theme = { "PrimaryTextColor" } },
 		})
 	end
 
-	-- Only show Rainbow Icon toggle if user is not poor
+	-- Only show icon toggles if user is not poor
 	if not UserIsPoor then
+		UI:createToggle({
+			text = "Show Icon",
+			state = true,
+			callback = function(state)
+				Library.IconVisible = state
+				local TitleIcon = Title:FindFirstChild("TitleIcon")
+				if TitleIcon then
+					TitleIcon.Visible = state
+					if state then
+						Title.Text = "       " .. (Library.Title or "Leny")
+					else
+						Title.Text = Library.Title or "Leny"
+					end
+				end
+			end,
+		})
+
 		UI:createToggle({
 			text = "Rainbow Icon",
 			state = false,
@@ -2318,7 +2585,7 @@ function Library:createManager(options: table)
 		text = "Hide UI",
 		default = "Insert",
 		callback = function()
-			ScreenGui.Enabled = not ScreenGui.Enabled
+			Library:ToggleUI()
 		end,
 	})
 
@@ -2372,12 +2639,288 @@ function Library:createManager(options: table)
 
 	-- CREATE/SAVE CONFIGS
 	local configName = SaveManager:createTextBox({ text = "Config Name" })
-	
+	local importCode = nil
+	local lastShareCode = ""
+
+	local function normalizeCode(text: string)
+		local codeText = tostring(text or "")
+		codeText = string.gsub(codeText, "%s+", "")
+		return codeText
+	end
+
+	local function parseTimestamp(rawValue)
+		local numeric = tonumber(rawValue)
+		if not numeric then
+			return nil
+		end
+
+		if numeric > 9999999999 then
+			numeric = numeric / 1000
+		end
+
+		numeric = math.floor(numeric)
+		if numeric <= 0 then
+			return nil
+		end
+
+		return numeric
+	end
+
+	local function formatDuration(seconds: number)
+		local totalSeconds = math.max(0, math.floor(tonumber(seconds) or 0))
+		local hours = math.floor(totalSeconds / 3600)
+		local minutes = math.floor((totalSeconds % 3600) / 60)
+		local secs = totalSeconds % 60
+
+		if hours > 0 then
+			if minutes > 0 then
+				return tostring(hours) .. "h " .. tostring(minutes) .. "m"
+			end
+			return tostring(hours) .. "h"
+		end
+
+		if minutes > 0 then
+			return tostring(minutes) .. "m"
+		end
+
+		return tostring(secs) .. "s"
+	end
+
+	local function isValidShareCode(code: string)
+		return string.match(code, "^[0-9A-Za-z][0-9A-Za-z][0-9A-Za-z][0-9A-Za-z][0-9A-Za-z]$") ~= nil
+	end
+
+	local function notifyApiError(statusCode: number, isExport: boolean, responseHeaders: table?)
+		if statusCode == 400 then
+			Library:notify({ title = "Config API", text = "Invalid request data.", duration = 4 })
+			return
+		end
+
+		if statusCode == 404 then
+			Library:notify({ title = "Config API", text = "Code not found or expired.", duration = 4 })
+			return
+		end
+
+		if statusCode == 429 then
+			local retryAfter = tonumber(getHeader(responseHeaders, "Retry-After")) or 0
+
+			if isExport and retryAfter > 0 then
+				exportCooldownUntil = math.max(exportCooldownUntil, tick() + retryAfter)
+				Library:notify({
+					title = "Export Rate Limited",
+					text = "Try again in " .. formatDuration(retryAfter) .. ".",
+					duration = 5,
+				})
+			else
+				Library:notify({ title = "Config API", text = "Rate limited. Please wait and retry.", duration = 5 })
+			end
+
+			return
+		end
+
+		if statusCode == 500 then
+			Library:notify({ title = "Config API", text = "Server error while processing config.", duration = 5 })
+			return
+		end
+
+		Library:notify({
+			title = "Config API",
+			text = "Unexpected error (" .. tostring(statusCode) .. ").",
+			duration = 5,
+		})
+	end
+
+	if options.apiBaseUrl ~= "" then
+		importCode = SaveManager:createTextBox({ text = "Import Code" })
+
+		SaveManager:createButton({
+			text = "Import Settings",
+			callback = function()
+				local code = normalizeCode(importCode:getText())
+				if not isValidShareCode(code) then
+					Library:notify({
+						title = "Import Settings",
+						text = "Enter a valid 5-character code.",
+						duration = 4,
+					})
+					return
+				end
+
+				local response, requestError = requestApi("GET", "/api/import/" .. code)
+				if not response then
+					Library:notify({
+						title = "Import Settings",
+						text = "Request failed: " .. tostring(requestError),
+						duration = 5,
+					})
+					return
+				end
+
+				if tonumber(response.StatusCode) ~= 200 then
+					notifyApiError(tonumber(response.StatusCode) or 0, false, response.Headers)
+					return
+				end
+
+				local decodeSuccess, decoded = pcall(function()
+					return HttpService:JSONDecode(response.Body or "")
+				end)
+
+				if not decodeSuccess or type(decoded) ~= "table" then
+					Library:notify({ title = "Import Settings", text = "Failed to decode settings.", duration = 5 })
+					return
+				end
+
+				local applySuccess, applyError = applySavedData(decoded)
+				if not applySuccess then
+					Library:notify({ title = "Import Settings", text = tostring(applyError), duration = 5 })
+					return
+				end
+
+				Library:notify({ title = "Import Settings", text = "Settings imported successfully.", duration = 4 })
+			end,
+		})
+
+		SaveManager:createButton({
+			text = "Export Settings",
+			callback = function()
+				local now = tick()
+				if now < exportCooldownUntil then
+					local timeLeft = math.ceil(exportCooldownUntil - now)
+					Library:notify({
+						title = "Export Settings",
+						text = "Export is on cooldown for " .. formatDuration(timeLeft) .. ".",
+						duration = 4,
+					})
+					return
+				end
+
+				local payload = getSavedData()
+				local response, requestError = requestApi("POST", "/api/export", payload)
+				if not response then
+					Library:notify({
+						title = "Export Settings",
+						text = "Request failed: " .. tostring(requestError),
+						duration = 5,
+					})
+					return
+				end
+
+				if tonumber(response.StatusCode) ~= 200 then
+					notifyApiError(tonumber(response.StatusCode) or 0, true, response.Headers)
+					return
+				end
+
+				local decodeSuccess, decoded = pcall(function()
+					return HttpService:JSONDecode(response.Body or "")
+				end)
+
+				if
+					not decodeSuccess
+					or type(decoded) ~= "table"
+					or not isValidShareCode(tostring(decoded.code or ""))
+				then
+					Library:notify({
+						title = "Export Settings",
+						text = "Server returned an invalid code.",
+						duration = 5,
+					})
+					return
+				end
+
+				local code = tostring(decoded.code)
+				lastShareCode = code
+
+				local copyFn = setclipboard or toclipboard
+				local copiedToClipboard = false
+				if copyFn then
+					copiedToClipboard = pcall(function()
+						copyFn(code)
+					end)
+				end
+
+				local remaining = tonumber(getHeader(response.Headers, "X-RateLimit-Remaining"))
+				local limit = tonumber(getHeader(response.Headers, "X-RateLimit-Limit"))
+				local usageText = "?/?"
+				if remaining ~= nil and limit ~= nil then
+					local used = math.clamp(limit - remaining, 0, limit)
+					usageText = tostring(used) .. "/" .. tostring(limit)
+				elseif remaining ~= nil then
+					usageText = "?/?"
+				end
+
+				local resetInText = "unknown"
+				local resetTimestamp = parseTimestamp(getHeader(response.Headers, "X-RateLimit-Reset"))
+				if resetTimestamp then
+					resetInText = formatDuration(math.max(0, resetTimestamp - os.time()))
+				end
+
+				local expiryRaw = decoded.expiresAt or decoded.expires_at or decoded.expiry or decoded.expireAt
+				local expiresText = "7d"
+				local expiryTimestamp = parseTimestamp(expiryRaw)
+				if expiryTimestamp then
+					expiresText = formatDuration(math.max(0, expiryTimestamp - os.time()))
+				end
+
+				local clipboardText = copiedToClipboard and "Copied" or "No clipboard"
+
+				Library:notify({
+					title = "Export Settings",
+					text = "Code: "
+						.. code
+						.. " | "
+						.. usageText
+						.. " | expires in "
+						.. expiresText
+						.. " | reset in "
+						.. resetInText
+						.. " | "
+						.. clipboardText,
+					duration = 10,
+				})
+			end,
+		})
+
+		SaveManager:createButton({
+			text = "Copy Share Code",
+			callback = function()
+				local code = normalizeCode(lastShareCode)
+				if not isValidShareCode(code) then
+					Library:notify({ title = "Copy Share Code", text = "No valid share code to copy.", duration = 4 })
+					return
+				end
+
+				local copyFn = setclipboard or toclipboard
+				if not copyFn then
+					Library:notify({
+						title = "Copy Share Code",
+						text = "Clipboard is not supported in this executor.",
+						duration = 4,
+					})
+					return
+				end
+
+				local copySuccess = pcall(function()
+					copyFn(code)
+				end)
+
+				if copySuccess then
+					Library:notify({
+						title = "Copy Share Code",
+						text = "Copied " .. code .. " to clipboard.",
+						duration = 4,
+					})
+				else
+					Library:notify({ title = "Copy Share Code", text = "Failed to copy code.", duration = 4 })
+				end
+			end,
+		})
+	end
+
 	SaveManager:createButton({
 		text = "Create Config",
 		callback = function()
 			local SavedData = getSavedData()
-			local encoded = game:GetService("HttpService"):JSONEncode(SavedData)
+			local encoded = HttpService:JSONEncode(SavedData)
 			writefile(options.folderName .. "/" .. configName:getText() .. ".json", encoded)
 
 			if shared.Flags.Dropdown["Configs"] then
@@ -2401,7 +2944,7 @@ function Library:createManager(options: table)
 				return
 			end
 			local SavedData = getSavedData()
-			local encoded = game:GetService("HttpService"):JSONEncode(SavedData)
+			local encoded = HttpService:JSONEncode(SavedData)
 			writefile(options.folderName .. "/" .. configValue .. ".json", encoded)
 			Configs:updateList({ list = getJsons(), default = { configValue } })
 		end,
@@ -2452,17 +2995,17 @@ function Library:createManager(options: table)
 			end
 		end,
 	})
-	
+
 	ThemeManager:createButton({
 		text = "Refresh Presets",
 		callback = function()
-			ThemePresets:updateList({ 
-				list = getThemePresets(), 
-				default = {} 
+			ThemePresets:updateList({
+				list = getThemePresets(),
+				default = {},
 			})
 		end,
 	})
-	
+
 	ThemeManager:createButton({
 		text = "Set Preset Auto Load",
 		callback = function()
@@ -2479,12 +3022,12 @@ function Library:createManager(options: table)
 
 	-- LOCAL THEME CONFIGS SECTION (your saved themes)
 	local themeConfigName = ThemeManager:createTextBox({ text = "Theme Config Name" })
-	
+
 	ThemeManager:createButton({
 		text = "Create Theme Config",
 		callback = function()
 			local ThemeData = getThemeData()
-			local encoded = game:GetService("HttpService"):JSONEncode(ThemeData)
+			local encoded = HttpService:JSONEncode(ThemeData)
 			writefile(options.folderName .. "/" .. "Theme/" .. themeConfigName:getText() .. ".json", encoded)
 
 			if shared.Flags.Dropdown["Theme Configs"] then
@@ -2527,12 +3070,12 @@ function Library:createManager(options: table)
 				return
 			end
 			local ThemeData = getThemeData()
-			local encoded = game:GetService("HttpService"):JSONEncode(ThemeData)
+			local encoded = HttpService:JSONEncode(ThemeData)
 			writefile(options.folderName .. "/" .. "Theme/" .. themeValue .. ".json", encoded)
 			ThemeConfigs:updateList({ list = getThemeJsons(), default = { themeValue } })
 		end,
 	})
-	
+
 	ThemeManager:createButton({
 		text = "Set Config Auto Load",
 		callback = function()
@@ -2546,7 +3089,7 @@ function Library:createManager(options: table)
 			end
 		end,
 	})
-	
+
 	-- Auto-load preset from GitHub if set
 	if isfile(options.folderName .. "/presetautoload.txt") then
 		local autoloadPreset = readfile(options.folderName .. "/presetautoload.txt")
@@ -2554,7 +3097,7 @@ function Library:createManager(options: table)
 			loadThemeConfig(autoloadPreset, true)
 		end
 	end
-	
+
 	-- Auto-load local theme config if set
 	if isfile(options.folderName .. "/themeautoload.txt") then
 		local autoloadTheme = readfile(options.folderName .. "/themeautoload.txt")
