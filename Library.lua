@@ -27,6 +27,7 @@ local Library = {
 	processedEvent = false,
 	managerCreated = false,
 	lineIndex = 0,
+	dropdownOpen = 0,
 
 	Connections = {},
 	Addons = {},
@@ -138,14 +139,10 @@ local Line = Filler.Line
 local Title = Tabs.Frame.Title
 
 if not LPH_OBFUSCATED then
-	LRM_ScriptName = LRM_ScriptName or "dev"
+    LRM_ScriptName = LRM_ScriptName or "dev"
 end
 
-if LRM_ScriptName == "Mainfile Maxhub Free" then
-	UserIsPoor = true
-else
-	UserIsPoor = false
-end
+UserIsPoor = getgenv().UserIsPoor == true
 
 function Library:createTooltip()
 	if Library.TooltipInstance then
@@ -158,6 +155,7 @@ function Library:createTooltip()
 	Tooltip.BorderSizePixel = 0
 	Tooltip.Visible = false
 	Tooltip.ZIndex = 9999
+	Tooltip.AutomaticSize = Enum.AutomaticSize.Y
 	Tooltip.Parent = ScreenGui
 
 	local UICorner = Instance.new("UICorner")
@@ -174,12 +172,14 @@ function Library:createTooltip()
 	local TextLabel = Instance.new("TextLabel")
 	TextLabel.Name = "Text"
 	TextLabel.BackgroundTransparency = 1
-	TextLabel.Size = UDim2.fromScale(1, 1)
+	TextLabel.Size = UDim2.new(1, 0, 0, 0)
+	TextLabel.AutomaticSize = Enum.AutomaticSize.Y
 	TextLabel.Font = Enum.Font.Gotham
 	TextLabel.TextSize = 13
 	TextLabel.TextColor3 = Theme.PrimaryTextColor
 	TextLabel.TextXAlignment = Enum.TextXAlignment.Left
-	TextLabel.TextYAlignment = Enum.TextYAlignment.Center
+	TextLabel.TextYAlignment = Enum.TextYAlignment.Top
+	TextLabel.TextWrapped = true
 	TextLabel.Parent = Tooltip
 
 	local Border = Instance.new("UIStroke")
@@ -205,51 +205,56 @@ function Library:cancelTooltipTweens()
 end
 
 function Library:showTooltip(element, text)
-	if not text or text == "" then
-		return
-	end
+    if not text or text == "" then return end
+    if Library.dropdownOpen > 0 then return end
 
-	local Tooltip = Library:createTooltip()
-	local TextLabel = Tooltip.Text
+    local Tooltip = Library:createTooltip()
+    local TextLabel = Tooltip.Text
 
-	-- Bump ID so any pending hide callback gets cancelled
-	Library.TooltipShowId = Library.TooltipShowId + 1
+    Library.TooltipShowId = Library.TooltipShowId + 1
+    Library:cancelTooltipTweens()
 
-	-- Kill any running fade-out tweens immediately
-	Library:cancelTooltipTweens()
+    if Library.TooltipMoveConnection then
+        Library.TooltipMoveConnection:Disconnect()
+        Library.TooltipMoveConnection = nil
+    end
 
-	-- Disconnect old move connection if any
-	if Library.TooltipMoveConnection then
-		Library.TooltipMoveConnection:Disconnect()
-		Library.TooltipMoveConnection = nil
-	end
+    TextLabel.Text = text
 
-	TextLabel.Text = text
-	local textSize = TextService:GetTextSize(text, 13, Enum.Font.Gotham, Vector2.new(300, 1000))
-	Tooltip.Size = UDim2.fromOffset(textSize.X + 16, textSize.Y + 12)
+    local maxW = 260
+    local textSize = TextService:GetTextSize(text, 13, Enum.Font.Gotham, Vector2.new(maxW, 10000))
+    local w = math.min(textSize.X, maxW) + 16
+    Tooltip.Size = UDim2.fromOffset(w, 0)
 
-	-- Snap fully visible instantly
-	Tooltip.BackgroundTransparency = 0
-	TextLabel.TextTransparency = 0
+    Tooltip.BackgroundTransparency = 0
+    TextLabel.TextTransparency = 0
 
-	local function updatePosition()
-		local mousePos = UserInputService:GetMouseLocation()
-		local offsetX = -30
-		local offsetY = -30
-		Tooltip.Position = UDim2.fromOffset(mousePos.X + offsetX, mousePos.Y + offsetY)
-	end
+    local function updatePosition()
+        if Library.dropdownOpen > 0 then
+            Tooltip.Visible = false
+            return
+        end
+        local mouse = UserInputService:GetMouseLocation()
+        local sx = ScreenGui.AbsoluteSize.X
+        local sy = ScreenGui.AbsoluteSize.Y
+        local tw = Tooltip.AbsoluteSize.X
+        local th = Tooltip.AbsoluteSize.Y
+        local x = math.clamp(mouse.X + -5, 4, sx - tw - 4)
+        local y = math.clamp(mouse.Y + -25, 4, sy - th - 4)
+        Tooltip.Position = UDim2.fromOffset(x, y)
+    end
 
-	updatePosition()
-	Tooltip.Visible = true
+    updatePosition()
+    Tooltip.Visible = true
 
-	local moveConnection = UserInputService.InputChanged:Connect(function(input)
-		if input.UserInputType == Enum.UserInputType.MouseMovement then
-			updatePosition()
-		end
-	end)
+    local conn = UserInputService.InputChanged:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseMovement then
+            updatePosition()
+        end
+    end)
 
-	Library.TooltipMoveConnection = moveConnection
-	table.insert(Connections, moveConnection)
+    Library.TooltipMoveConnection = conn
+    table.insert(Connections, conn)
 end
 
 function Library:hideTooltip()
@@ -1503,6 +1508,9 @@ function Library:createDropdown(options: table, parent, scrollingFrame)
 
 	local function toggleList()
 		if List.Size.Y.Offset <= 0 then
+			Library.dropdownOpen = Library.dropdownOpen + 1
+			Library:forceHideTooltip()
+
 			for index, value in ipairs(Library.DropdownSizes) do
 				if value.object ~= Dropdown then
 					scrollingFrame.CanvasSize = scrollingFrame.CanvasSize - value.size
@@ -1511,10 +1519,7 @@ function Library:createDropdown(options: table, parent, scrollingFrame)
 			end
 
 			for _, object in ipairs(scrollingFrame:GetDescendants()) do
-				if object.Name == "Section" then
-					object.ZIndex = 1
-				end
-
+				if object.Name == "Section" then object.ZIndex = 1 end
 				if object.Name == "List" and object ~= List then
 					object.Parent.ZIndex = 1
 					Utility:tween(object, { Size = UDim2.new(1, 0, 0, 0) }, 0.2, "Quart", "Out"):Play()
@@ -1529,28 +1534,18 @@ function Library:createDropdown(options: table, parent, scrollingFrame)
 			end
 
 			Dropdown.ZIndex = 2
+			if self.Section then self.Section.Parent.ZIndex = 2 end
 
-			if self.Section then
-				self.Section.Parent.ZIndex = 2
-			end
-
-			Utility:tween(
-				List,
-				{ Size = UDim2.new(1, 0, 0, math.clamp(Inner.UIListLayout.AbsoluteContentSize.Y, 0, 210)) },
-				0.2,
-				"Quart",
-				"Out"
-			):Play()
+			Utility:tween(List, { Size = UDim2.new(1, 0, 0, math.clamp(Inner.UIListLayout.AbsoluteContentSize.Y, 0, 210)) }, 0.2, "Quart", "Out"):Play()
 			table.insert(Library.DropdownSizes, {
 				object = Dropdown,
 				size = UDim2.new(0, 0, 0, math.clamp(Inner.UIListLayout.AbsoluteContentSize.Y, 0, 210)),
 			})
-
-			scrollingFrame.CanvasSize = scrollingFrame.CanvasSize
-				+ UDim2.new(0, 0, 0, math.clamp(Inner.UIListLayout.AbsoluteContentSize.Y, 0, 210))
+			scrollingFrame.CanvasSize = scrollingFrame.CanvasSize + UDim2.new(0, 0, 0, math.clamp(Inner.UIListLayout.AbsoluteContentSize.Y, 0, 210))
 		else
-			Utility:tween(List, { Size = UDim2.new(1, 0, 0, 0) }, 0.2, "Quart", "Out"):Play()
+			Library.dropdownOpen = math.max(0, Library.dropdownOpen - 1)
 
+			Utility:tween(List, { Size = UDim2.new(1, 0, 0, 0) }, 0.2, "Quart", "Out"):Play()
 			for index, value in ipairs(Library.DropdownSizes) do
 				if value.object == Dropdown then
 					scrollingFrame.CanvasSize = scrollingFrame.CanvasSize - value.size
