@@ -138,12 +138,6 @@ local Resize = Filler.Resize
 local Line = Filler.Line
 local Title = Tabs.Frame.Title
 
-if not LPH_OBFUSCATED then
-    LRM_ScriptName = LRM_ScriptName or "dev"
-end
-
-UserIsPoor = getgenv().UserIsPoor == true
-
 function Library:createTooltip()
 	if Library.TooltipInstance then
 		return Library.TooltipInstance
