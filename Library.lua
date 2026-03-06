@@ -2131,7 +2131,7 @@ function Library:createManager(options: table)
 		local themeJsons = {}
 		for _, file in ipairs(listfiles(THEME_FOLDER_PATH)) do
 			local fileName = file:match("([^/\\]+)$")
-			if fileName then
+			if fileName and string.match(string.lower(fileName), "%.json$") then
 				fileName = string.gsub(fileName, "%.json$", "")
 				table.insert(themeJsons, fileName)
 			end
