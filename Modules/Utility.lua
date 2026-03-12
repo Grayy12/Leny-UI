@@ -5,6 +5,10 @@ local RunService = game:GetService("RunService")
 local TweenService = game:GetService("TweenService")
 local UserInputService = game:GetService("UserInputService")
 
+local ConnectionManager = loadstring(
+	game:HttpGet("https://raw.githubusercontent.com/Grayy12/EXT/main/connections.lua", true)
+)().new("LenyUI - Utility Module")
+
 function Utility:tween(object, properties, duration, easingStyle, easingDirection)
 	local tweenInfo = TweenInfo.new(
 		duration or 0.3,
@@ -178,6 +182,7 @@ end
 local localPlayer = Players.LocalPlayer
 local defaultMouseIcon, defaultMouseVisiblity
 local mouseToggled = false
+local mouseHook
 
 function Utility:SetMouseCursorVisibility(toggle)
 	if not defaultMouseIcon then
@@ -188,12 +193,39 @@ function Utility:SetMouseCursorVisibility(toggle)
 		defaultMouseVisiblity = UserInputService.MouseIconEnabled
 	end
 	if toggle and not mouseToggled then
-		RunService:BindToRenderStep("LenyShowMouse", Enum.RenderPriority.First.Value, function()
-			localPlayer:GetMouse().Icon = ""
-			UserInputService.MouseIconEnabled = true
-		end)
+		-- Some games are more stubborn when it comes to locking the mouse... I Dont like this, but it is what it is
+		if
+			hookmetamethod
+			and shared.Flags
+			and shared.Flags.Toggle["Aggressive Mouse Unlock"]
+			and shared.Flags.Toggle["Aggressive Mouse Unlock"]:GetState()
+		then
+			mouseHook = ConnectionManager:NewHook("__newindex", function(orig, self, key, value)
+				if not checkcaller() then
+					if self == UserInputService and key == "MouseIconEnabled" then
+						return orig(self, key, true)
+					end
+
+					if self == localPlayer:GetMouse() and key == "Icon" then
+						return orig(self, key, "")
+					end
+				end
+				return orig(self, key, value)
+			end)
+		else
+			RunService:BindToRenderStep("LenyShowMouse", Enum.RenderPriority.Last.Value, function()
+				localPlayer:GetMouse().Icon = ""
+				UserInputService.MouseIconEnabled = true
+			end)
+		end
 	elseif not toggle and mouseToggled then
+		if mouseHook then
+			mouseHook:Delete()
+			mouseHook = nil
+		end
+
 		RunService:UnbindFromRenderStep("LenyShowMouse")
+
 		localPlayer:GetMouse().Icon = defaultMouseIcon
 		UserInputService.MouseIconEnabled = defaultMouseVisiblity
 		defaultMouseIcon = nil

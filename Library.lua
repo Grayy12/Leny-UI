@@ -2523,6 +2523,12 @@ function Library:createManager(options: table)
 		})
 	end
 
+	UI:createToggle({
+			text = "Aggressive Mouse Unlock",
+			state = false,
+			tooltip = 'Only enable if the mouse is invisible while the UI is open. (May cause detections)',
+		})
+
 	UI:createPicker({
 		text = "SecondaryTextColor",
 		default = Theme.SecondaryTextColor,
