@@ -188,8 +188,8 @@ function Utility:SetMouseCursorVisibility(toggle)
 		defaultMouseVisiblity = UserInputService.MouseIconEnabled
 	end
 	if toggle and not mouseToggled then
-		localPlayer:GetMouse().Icon = ""
 		RunService:BindToRenderStep("LenyShowMouse", Enum.RenderPriority.First.Value, function()
+			localPlayer:GetMouse().Icon = ""
 			UserInputService.MouseIconEnabled = true
 		end)
 	elseif not toggle and mouseToggled then
