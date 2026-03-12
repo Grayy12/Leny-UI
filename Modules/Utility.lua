@@ -1,15 +1,21 @@
 local Utility = {}
 
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
 local TweenService = game:GetService("TweenService")
 local UserInputService = game:GetService("UserInputService")
 
 function Utility:tween(object, properties, duration, easingStyle, easingDirection)
-	local tweenInfo = TweenInfo.new(duration or 0.3, Enum.EasingStyle[easingStyle or "Circular"], Enum.EasingDirection[easingDirection or "Out"])
+	local tweenInfo = TweenInfo.new(
+		duration or 0.3,
+		Enum.EasingStyle[easingStyle or "Circular"],
+		Enum.EasingDirection[easingDirection or "Out"]
+	)
 	return TweenService:Create(object, tweenInfo, properties)
 end
 
 function Utility:lookBeforeChildOfObject(indexFromLoop, object, specifiedObjectName)
-	local Object = object:GetChildren()[indexFromLoop-1]
+	local Object = object:GetChildren()[indexFromLoop - 1]
 	return Object and Object.Name == specifiedObjectName, Object
 end
 
@@ -28,7 +34,7 @@ function Utility:validateContext(context)
 	for key, tbl in pairs(context) do
 		assert(typeof(tbl.Value) == tbl.ExpectedType, "Expected '" .. key .. "' to be a " .. tbl.ExpectedType)
 		context[key] = tbl.Value
-	end 
+	end
 
 	return context
 end
@@ -36,7 +42,7 @@ end
 function Utility:getTransparentObjects(objects: Instance)
 	local TransparentObjects = {}
 
-	for _, object in ipairs(objects:GetDescendants()) do	
+	for _, object in ipairs(objects:GetDescendants()) do
 		if object.Name ~= "CurrentValueLabel" and object.Name ~= "Checkmark" then -- exclusions, doing this way since it's more performant, and I'm lazy to do it in another way
 			local hasBackgroundTransparency, backgroundTransparencyValue = pcall(function()
 				return object.BackgroundTransparency
@@ -50,16 +56,16 @@ function Utility:getTransparentObjects(objects: Instance)
 				return object.ImageTransparency
 			end)
 
-			if (hasBackgroundTransparency and backgroundTransparencyValue <= 0.1)  then
-				table.insert(TransparentObjects, {object = object, property = "BackgroundTransparency"})
+			if hasBackgroundTransparency and backgroundTransparencyValue <= 0.1 then
+				table.insert(TransparentObjects, { object = object, property = "BackgroundTransparency" })
 			end
 
-			if (hasTextTransparency and textTransparencyValue <= 0.1) then
-				table.insert(TransparentObjects, {object = object, property = "TextTransparency"})
+			if hasTextTransparency and textTransparencyValue <= 0.1 then
+				table.insert(TransparentObjects, { object = object, property = "TextTransparency" })
 			end
 
-			if (hasImageTransparency and imageTransparencyValue <= 0.1) then
-				table.insert(TransparentObjects, {object = object, property = "ImageTransparency"})
+			if hasImageTransparency and imageTransparencyValue <= 0.1 then
+				table.insert(TransparentObjects, { object = object, property = "ImageTransparency" })
 			end
 		end
 	end
@@ -112,33 +118,33 @@ local function dragging(library: table, ui: Instance, uiForResizing: Instance, c
 			setInitialPositionsAndSize(UserInputService:GetMouseLocation())
 		end
 	end
-	
+
 	local touchMoved = UserInputService.TouchMoved:Connect(function(input)
 		if dragging then
 			update(input)
 		end
 	end)
-	
+
 	local touchEnded = UserInputService.TouchEnded:Connect(function(input)
 		if dragging then
 			dragging = false
 			library.dragging = false
 		end
 	end)
-	
+
 	local inputChanged = UserInputService.InputChanged:Connect(function(input)
 		if dragging and input.UserInputType == Enum.UserInputType.MouseMovement then
 			update(input)
 		end
 	end)
-	
+
 	local inputEnded = UserInputService.InputEnded:Connect(function(input)
 		if dragging and input.UserInputType == Enum.UserInputType.MouseButton1 then
 			dragging = false
 			library.dragging = false
 		end
 	end)
-	
+
 	table.insert(library.Connections, ui[eventNameToEnableDrag]:Connect(enableDrag))
 	table.insert(library.Connections, touchMoved)
 	table.insert(library.Connections, inputChanged)
@@ -147,14 +153,54 @@ end
 
 function Utility:draggable(library: table, uiToEnableDrag: Instance)
 	dragging(library, uiToEnableDrag, nil, function(delta, ui, currentUIPosition)
-		self:tween(ui, {Position = UDim2.new(currentUIPosition.X.Scale, currentUIPosition.X.Offset + delta.X, currentUIPosition.Y.Scale, currentUIPosition.Y.Offset + delta.Y)}, 0.15):Play()
+		self:tween(ui, {
+			Position = UDim2.new(
+				currentUIPosition.X.Scale,
+				currentUIPosition.X.Offset + delta.X,
+				currentUIPosition.Y.Scale,
+				currentUIPosition.Y.Offset + delta.Y
+			),
+		}, 0.15):Play()
 	end)
 end
 
 function Utility:resizable(library: table, uiToEnableDrag: Instance, uiToResize: Instance)
 	dragging(library, uiToEnableDrag, uiToResize, function(delta, ui, currentUIPosition, currentUISizeForUIResizing)
-		self:tween(uiToResize, {Size = UDim2.fromOffset(currentUISizeForUIResizing.X.Offset + delta.X, currentUISizeForUIResizing.Y.Offset + delta.Y)}, 0.15):Play()
+		self:tween(uiToResize, {
+			Size = UDim2.fromOffset(
+				currentUISizeForUIResizing.X.Offset + delta.X,
+				currentUISizeForUIResizing.Y.Offset + delta.Y
+			),
+		}, 0.15):Play()
 	end)
+end
+
+local localPlayer = Players.LocalPlayer
+local defaultMouseIcon, defaultMouseVisiblity
+local mouseToggled = false
+
+function Utility:SetMouseCursorVisibility(toggle)
+	mouseToggled = toggle
+
+	if not defaultMouseIcon then
+		defaultMouseIcon = localPlayer:GetMouse().Icon
+	end
+
+	if not defaultMouseVisiblity then
+		defaultMouseVisiblity = UserInputService.MouseIconEnabled
+	end
+	if toggle and not mouseToggled then
+		localPlayer:GetMouse().Icon = ""
+		RunService:BindToRenderStep("LenyShowMouse", Enum.RenderPriority.First.Value, function()
+			UserInputService.MouseIconEnabled = true
+		end)
+	elseif not toggle and mouseToggled then
+		RunService:UnbindFromRenderStep("LenyShowMouse")
+		localPlayer:GetMouse().Icon = defaultMouseIcon
+		UserInputService.MouseIconEnabled = defaultMouseVisiblity
+		defaultMouseIcon = nil
+		defaultMouseVisiblity = nil
+	end
 end
 
 return Utility
