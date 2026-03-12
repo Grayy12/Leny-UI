@@ -180,8 +180,6 @@ local defaultMouseIcon, defaultMouseVisiblity
 local mouseToggled = false
 
 function Utility:SetMouseCursorVisibility(toggle)
-	mouseToggled = toggle
-
 	if not defaultMouseIcon then
 		defaultMouseIcon = localPlayer:GetMouse().Icon
 	end
@@ -201,6 +199,7 @@ function Utility:SetMouseCursorVisibility(toggle)
 		defaultMouseIcon = nil
 		defaultMouseVisiblity = nil
 	end
+	mouseToggled = toggle
 end
 
 return Utility
