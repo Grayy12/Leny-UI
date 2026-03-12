@@ -198,7 +198,7 @@ function Utility:SetMouseCursorVisibility(toggle)
 			hookmetamethod
 			and shared.Flags
 			and shared.Flags.Toggle["Aggressive Mouse Unlock"]
-			and shared.Flags.Toggle["Aggressive Mouse Unlock"]:GetState()
+			and shared.Flags.Toggle["Aggressive Mouse Unlock"]:getState()
 		then
 			mouseHook = ConnectionManager:NewHook("__newindex", function(orig, self, key, value)
 				if not checkcaller() then
