@@ -654,6 +654,7 @@ function Library:createTab(options: table)
 	Tab.Parent = ScrollingFrame
 
 	local ImageButton = Tab.ImageButton
+	ImageButton.Modal = true
 
 	local Icon = ImageButton.Icon
 	Icon.Image = "rbxassetid://" .. options.icon
@@ -2579,7 +2580,7 @@ function Library:createManager(options: table)
 
 	UI:createKeybind({
 		text = "Hide UI",
-		default = "Insert",
+		default = "Delete",
 		callback = function()
 			Library:ToggleUI()
 		end,

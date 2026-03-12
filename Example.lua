@@ -128,7 +128,7 @@ Toggle:createDropdown({})
 Toggle:createToggle({})
 
 -- Flags example
-print(shared.Flags.Toggle["Toggle 1"]:getState()) -- refers to the {text = "Toggle 1"} you set for the element
+print("Toggle 1 Value:", Library.Flags.Toggle["Toggle 1"]:getState()) -- refers to the {text = "Toggle 1"} you set for the element
 
 -- Creates the theme changer, config manager, etc
 Library:createManager({
