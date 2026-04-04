@@ -33,6 +33,7 @@ local UserInputService = game:GetService('UserInputService')
 	end)
 
 	local inputBegan = UserInputService.InputBegan:Connect(function(input, gameProcessedEvent)
+		if gameProcessedEvent then return end
 		if (input.UserInputType == Enum.UserInputType.Keyboard or input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.MouseButton2) then
 			local inputName = input.UserInputType == Enum.UserInputType.Keyboard and input.KeyCode.Name or input.UserInputType.Name
 			
@@ -48,7 +49,7 @@ local UserInputService = game:GetService('UserInputService')
 				end
 			end
 
-			if not changingBind and not gameProcessedEvent and inputName == self.TextButton.Text and not self.Library.processedEvent then
+			if not changingBind and inputName == self.TextButton.Text and not self.Library.processedEvent then
 				if self.onHeld then
 					self.onHeldDebounce = true
 
